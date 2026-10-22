@@ -63,6 +63,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Bildirim gönderim kaydı: yönetici görür ve sıfırlayabilir.
+    match /system/{id} {
+      allow read, write: if isAdmin();
+    }
+
     // Bildirim için cihaz anahtarları: herkes kendi cihazını kaydeder.
     match /tokens/{id} {
       allow read: if isAdmin();

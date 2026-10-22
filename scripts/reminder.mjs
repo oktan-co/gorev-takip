@@ -1,112 +1,81 @@
 /**
- * Günlük görev hatırlatması.
- * GitHub Actions her saat başı çalıştırır; gönderip göndermeyeceğine
- * uygulamadaki Ayarlar ekranı karar verir (saat, açık/kapalı, hangi listeler).
+ * Görev hatırlatmaları.
+ * cron-job.org her 5 dakikada bir bu işi tetikler (yedek olarak GitHub'ın kendi
+ * zamanlayıcısı da 30 dakikada bir çalışır). Ne zaman, ne gönderileceğine
+ * uygulamadaki Ayarlar karar verir; aynı hatırlatma iki kez gönderilmez.
  */
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
+import { istanbulNow, planJobs, buildMessage, tasksForUser, normSettings, addDays } from "./plan.mjs";
 
-const TZ = "Europe/Istanbul";
-const FORCE = process.argv.includes("--force");
+const TEST = process.env.TEST === "true" || process.argv.includes("--test");
 
 const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || "{}");
 if (!sa.project_id) { console.error("FIREBASE_SERVICE_ACCOUNT secret'ı eksik."); process.exit(1); }
 initializeApp({ credential: cert(sa) });
 const db = getFirestore();
 
-/* --- İstanbul saatine göre bugün --- */
-const parts = new Intl.DateTimeFormat("en-CA", {
-  timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", hour12: false
-}).formatToParts(new Date()).reduce((a, p) => (a[p.type] = p.value, a), {});
-const today = `${parts.year}-${parts.month}-${parts.day}`;
-const nowHour = Number(parts.hour);
-
 const col = async (name) => (await db.collection(name).get()).docs.map(d => ({ id: d.id, ...d.data() }));
-const dayDiff = (a, b) => Math.round((new Date(b + "T12:00:00Z") - new Date(a + "T12:00:00Z")) / 86400000);
+const APP_URL = process.env.APP_URL || "";
+const iconUrl = APP_URL ? new URL("icon-192.png", APP_URL).href : "icon-192.png";
 
-async function main(){
-  const sDoc = await db.doc("settings/app").get();
-  const s = sDoc.exists ? sDoc.data() : {};
-  const enabled = s.reminderEnabled !== false;
-  const timeStr = s.reminderTime || "11:00";
-  const wantHour = Number(timeStr.split(":")[0]);
+async function main() {
+  const now = istanbulNow();
+  const [sDoc, sentDoc] = await Promise.all([db.doc("settings/app").get(), db.doc("system/sent").get()]);
+  const settings = normSettings(sDoc.exists ? sDoc.data() : {});
+  const sent = sentDoc.exists ? sentDoc.data() : {};
+  const keys = { ...(sent.keys || {}) };
 
-  if (!FORCE){
-    if (!enabled) { console.log("Hatırlatma kapalı, çıkılıyor."); return; }
-    if (nowHour !== wantHour) { console.log(`Şu an ${nowHour}:00, hatırlatma saati ${timeStr}. Atlanıyor.`); return; }
-    if (s.lastReminderDate === today) { console.log("Bugün zaten gönderilmiş."); return; }
-  }
+  const jobs = planJobs(settings, now, keys, TEST);
+  if (!jobs.length) { console.log(`Saat ${now.hhmm}: gönderilecek hatırlatma yok.`); return; }
 
-  const [lists, tasks, tokens, users] = await Promise.all(
-    ["lists", "tasks", "tokens", "users"].map(col));
-
-  const remindList = new Map(lists.filter(l => l.reminder !== false).map(l => [l.id, l]));
-  const open = tasks.filter(t => !t.done && remindList.has(t.listId));
+  const [lists, tasks, tokens, users] = await Promise.all(["lists", "tasks", "tokens", "users"].map(col));
+  const listById = (id) => lists.find(l => l.id === id);
 
   const byUser = new Map();
-  for (const tok of tokens){
+  for (const tok of tokens) {
     if (!tok.token) continue;
-    const u = byUser.get(tok.uid) || { tokens: [], uid: tok.uid };
-    u.tokens.push(tok.token);
-    byUser.set(tok.uid, u);
+    if (!byUser.has(tok.uid)) byUser.set(tok.uid, []);
+    byUser.get(tok.uid).push(tok.token);
   }
-  if (!byUser.size) { console.log("Kayıtlı cihaz yok."); return; }
 
-  let sentAny = false;
+  const log = Array.isArray(sent.log) ? sent.log : [];
+  const deadTokens = new Set();
 
-  for (const [uid, u] of byUser){
-    const me = users.find(x => x.id === uid);
-    const admin = me?.role === "admin";
-    const mine = open.filter(t => {
-      if (admin) return true;
-      if (t.assignedTo === uid) return true;
-      const l = remindList.get(t.listId);
-      return l && (l.ownerUid === uid || (l.members || []).includes(uid));
-    });
+  for (const job of jobs) {
+    let devices = 0;
+    for (const [uid, toks] of byUser) {
+      const me = users.find(u => u.id === uid);
+      const mine = tasksForUser(uid, me?.role === "admin", tasks, lists);
+      const msg = buildMessage(job, mine, listById, settings);
+      if (!msg) { console.log(`${job.label} → ${uid}: gönderilecek görev yok.`); continue; }
 
-    const late = mine.filter(t => t.date && t.date < today);
-    const dueToday = mine.filter(t => t.date === today);
-    const undated = (s.includeUndated !== false) ? mine.filter(t => !t.date) : [];
-    if (!late.length && !dueToday.length && !undated.length){
-      console.log(`${uid}: görev yok, atlandı.`); continue;
+      const res = await getMessaging().sendEachForMulticast({
+        tokens: toks,
+        notification: { title: msg.title, body: msg.body.slice(0, 900) },
+        webpush: {
+          fcmOptions: APP_URL ? { link: APP_URL } : undefined,
+          notification: { icon: iconUrl, requireInteraction: !!msg.urgent }
+        }
+      });
+      devices += res.successCount;
+      console.log(`${job.label} → ${uid}: ${res.successCount} gönderildi, ${res.failureCount} başarısız.`);
+      res.responses.forEach((r, i) => {
+        const code = r.error?.code || "";
+        if (!r.success && /registration-token-not-registered|invalid-argument/.test(code)) deadTokens.add(toks[i]);
+      });
     }
-
-    const name = (t) => {
-      const l = remindList.get(t.listId);
-      return l ? `${t.title} (${l.name})` : t.title;
-    };
-    const lines = [];
-    if (late.length) lines.push("Gecikmiş: " + late.slice(0,4)
-      .map(t => `${name(t)} — ${dayDiff(t.date, today)} gün`).join(" · "));
-    if (dueToday.length) lines.push("Bugün: " + dueToday.slice(0,5).map(name).join(" · "));
-    if (undated.length) lines.push(`Tarihsiz: ${undated.length} görev bekliyor`);
-
-    const title = late.length
-      ? `${late.length} gecikmiş, ${dueToday.length} bugünlük görev`
-      : `Bugün ${dueToday.length} görevin var`;
-
-    const res = await getMessaging().sendEachForMulticast({
-      tokens: u.tokens,
-      notification: { title, body: lines.join("\n").slice(0, 900) },
-      webpush: {
-        fcmOptions: { link: process.env.APP_URL || "/" },
-        notification: { icon: "icon-192.png", tag: "gorev-hatirlatma" }
-      }
-    });
-    console.log(`${uid}: ${res.successCount} gönderildi, ${res.failureCount} başarısız.`);
-    sentAny = sentAny || res.successCount > 0;
-
-    // Geçersiz cihaz anahtarlarını temizle
-    await Promise.all(res.responses.map((r, i) => {
-      const code = r.error?.code || "";
-      if (r.success || !/registration-token-not-registered|invalid-argument/.test(code)) return null;
-      return db.doc("tokens/" + u.tokens[i].slice(0, 120)).delete().catch(() => {});
-    }));
+    for (const k of job.keys) keys[k] = Date.now();
+    log.push({ at: Date.now(), label: job.label, devices });
   }
 
-  if (sentAny && !FORCE) await db.doc("settings/app").set({ lastReminderDate: today }, { merge: true });
+  // Eski kayıtları temizle
+  const cutoff = addDays(now.date, -3);
+  for (const k of Object.keys(keys)) if (k.slice(0, 10) < cutoff) delete keys[k];
+  await db.doc("system/sent").set({ keys, log: log.slice(-40) });
+
+  await Promise.all([...deadTokens].map(t => db.doc("tokens/" + t.slice(0, 120)).delete().catch(() => {})));
 }
 
 main().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });

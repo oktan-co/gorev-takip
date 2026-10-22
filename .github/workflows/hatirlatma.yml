@@ -1,19 +1,29 @@
 name: Görev hatırlatması
 
 on:
+  # Asıl tetikleyici cron-job.org (5 dakikada bir). Bu satır yedek.
   schedule:
-    - cron: "5 * * * *"
+    - cron: "17,47 * * * *"
   workflow_dispatch:
+    inputs:
+      test:
+        description: "Test: bugünün özetini hemen gönder"
+        type: boolean
+        default: false
+
+concurrency:
+  group: hatirlatma
+  cancel-in-progress: false
 
 jobs:
   hatirlat:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Bağımlılıkları kur
         working-directory: scripts
@@ -24,4 +34,5 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           APP_URL: ${{ vars.APP_URL }}
-        run: node reminder.mjs ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+          TEST: ${{ inputs.test }}
+        run: node reminder.mjs

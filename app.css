@@ -179,6 +179,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .row{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
 .row:last-child{border-bottom:none}
 .row-label{flex:1;font-size:14px}
+.row>div:first-child{flex:1;min-width:0}
 .row-sub{font-size:12px;color:var(--tx-2);margin-top:2px}
 .row input[type=text],.row input[type=date],.row input[type=time],.row input[type=password],.row select{
   background:var(--bg-3);border:1px solid var(--line);border-radius:9px;padding:9px 11px;outline:none;max-width:60%
@@ -196,6 +197,40 @@ button,input,select,textarea{font:inherit;color:inherit}
 textarea{width:100%;background:var(--bg-3);border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none;resize:vertical;min-height:72px}
 .inline-add{display:flex;gap:8px;margin-top:10px}
 .inline-add input,.inline-add select{flex:1;background:var(--bg-3);border:1px solid var(--line);border-radius:9px;padding:9px 11px;outline:none;min-width:0}
+
+/* ---------- açılır ayar bölümleri ---------- */
+.acc{border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-2);margin-top:10px;overflow:hidden}
+.acc summary{list-style:none;display:flex;align-items:center;gap:10px;padding:13px 14px;cursor:pointer;user-select:none}
+.acc summary::-webkit-details-marker{display:none}
+.acc summary>div{flex:1;min-width:0}
+.acc-title{font-size:14.5px;font-weight:500}
+.acc-sub{font-size:12px;color:var(--tx-2);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc .chev{width:18px;height:18px;fill:none;stroke:var(--tx-3);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .15s;flex:0 0 auto}
+.acc[open] .chev{transform:rotate(180deg)}
+.acc-body{padding:2px 14px 14px;border-top:1px solid var(--line)}
+.help{font-size:12.5px;color:var(--tx-2);margin:10px 0 4px;line-height:1.45}
+.rem{border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:10px;background:var(--bg-3)}
+.rem-top,.rem-bottom{display:flex;align-items:center;gap:8px}
+.rem-bottom{margin-top:8px}
+.rem input[type=text],.rem input[type=time],.rem select{background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;outline:none;min-width:0}
+.rem-label{flex:1;font-weight:500}
+.rem select{flex:1}
+.row input.grow{flex:1;max-width:none}
+.chip-time{display:inline-flex;align-items:center;gap:6px;cursor:default;color:var(--dang);border-color:var(--dang);background:var(--dang-soft)}
+.chip-time button{background:none;border:none;color:inherit;font-size:16px;line-height:1;cursor:pointer;padding:0 0 0 2px}
+.hist{display:flex;gap:10px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.hist-time{color:var(--tx-2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.hist-label{flex:1}
+.hist-n{color:var(--tx-3);font-size:12px;white-space:nowrap}
+
+/* ---------- tekrar seçici ---------- */
+.block{padding:12px 0;border-bottom:1px solid var(--line)}
+.block .row-label .ic,.row .row-label .ic{width:16px;height:16px;display:inline-block;vertical-align:-3px;margin-right:4px}
+.daygrid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.dcell{background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:7px 0;font-size:13px;cursor:pointer;color:var(--tx-2)}
+.dcell.sel{background:var(--acc);border-color:var(--acc);color:#fff}
+input[type=number]{background:var(--bg-3);border:1px solid var(--line);border-radius:9px;padding:9px 11px;outline:none}
+.t-meta .nag{color:var(--dang)}
 
 .toast{position:fixed;left:50%;bottom:calc(22px + var(--safe-b));transform:translateX(-50%);background:var(--bg-3);border:1px solid var(--line-2);border-radius:999px;padding:10px 18px;font-size:13px;z-index:80;box-shadow:0 6px 20px rgba(0,0,0,.35)}
 

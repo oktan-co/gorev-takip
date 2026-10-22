@@ -1,6 +1,6 @@
 /* Arka planda bildirim almak için servis çalışanı.
-   Firebase ayarları, sayfa tarafından kayıt sırasında adres satırında gönderilir,
-   bu yüzden burada ayar düzenlemene gerek yok. */
+   Bildirimleri Firebase kendisi gösterir; her bildirim ayrı ve sesli gelir.
+   Firebase ayarları sayfa tarafından adres satırında gönderilir. */
 importScripts("https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js");
 
@@ -12,27 +12,21 @@ try {
 
 if (config) {
   firebase.initializeApp(config);
-  const messaging = firebase.messaging();
-
-  messaging.onBackgroundMessage((payload) => {
-    const n = payload.notification || {};
-    self.registration.showNotification(n.title || "Görevlerim", {
-      body: n.body || "",
-      icon: "icon-192.png",
-      badge: "icon-192.png",
-      tag: "gorev-hatirlatma",
-      data: { url: (payload.fcmOptions && payload.fcmOptions.link) || "./" }
-    });
-  });
+  firebase.messaging();
 }
 
+// Uygulamanın kendi gösterdiği bildirimlere (test, ön planda gelen) tıklanınca uygulamayı aç.
+// Firebase'in gönderdiklerini Firebase kendisi açar.
 self.addEventListener("notificationclick", (event) => {
+  if (event.notification.data && event.notification.data.FCM_MSG) return;
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || "./";
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
       for (const w of wins) if ("focus" in w) return w.focus();
-      return clients.openWindow(url);
+      return clients.openWindow(self.registration.scope);
     })
   );
 });
+
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));

@@ -11,6 +11,9 @@ import {
 import { getMessaging, getToken, isSupported, onMessage }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js";
 import { firebaseConfig, vapidKey, userDomain } from "./firebase-config.js";
+import {
+  addDays, dayDiff, nextOccurrence, firstOccurrence, isValidRule, describe, GUN_KISA
+} from "./repeat.js";
 
 /* ============ kurulum ============ */
 const app = initializeApp(firebaseConfig);
@@ -19,12 +22,29 @@ const db = getFirestore(app);
 
 const COLORS = ["#6c7cff","#1d9e75","#e5a33a","#d85a30","#d4537e","#7f77dd","#378add","#639922","#b4b2a9"];
 
+const DEFAULT_SETTINGS = {
+  reminders: [
+    { id: "sabah", label: "Sabah özeti", time: "09:00", type: "today", enabled: true },
+    { id: "gece",  label: "Gece özeti",  time: "23:59", type: "tomorrow", enabled: true }
+  ],
+  includeUndated: true,
+  nagEnabled: true,
+  nagTimes: ["21:00", "22:00", "23:00", "23:30", "23:40", "23:50"]
+};
+function normSettings(s = {}) {
+  const o = { ...DEFAULT_SETTINGS, ...s };
+  if (!Array.isArray(o.reminders)) o.reminders = DEFAULT_SETTINGS.reminders.map(r => ({ ...r }));
+  if (!Array.isArray(o.nagTimes)) o.nagTimes = [...DEFAULT_SETTINGS.nagTimes];
+  return o;
+}
+
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 
 const ICONS = {
   sun:'<path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>',
+  moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
   inbox:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1Z"/>',
   cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   check:'<path d="M20 6 9 17l-5-5"/>',
@@ -32,7 +52,11 @@ const ICONS = {
   up:'<path d="M7 17 17 7M9 7h8v8"/>',
   users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  note:'<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/>'
+  note:'<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/>',
+  repeat:'<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path d="M2 8c0-2.2.7-4.3 2-6M22 8a10 10 0 0 0-2-6"/>',
+  trash:'<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+  chev:'<path d="m6 9 6 6 6-6"/>'
 };
 const svg = (k, cls="ic") => `<svg viewBox="0 0 24 24" class="${cls}">${ICONS[k]}</svg>`;
 
@@ -40,10 +64,6 @@ const svg = (k, cls="ic") => `<svg viewBox="0 0 24 24" class="${cls}">${ICONS[k]
 const pad = (n) => String(n).padStart(2, "0");
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const today = () => ymd(new Date());
-function addDays(s, n){ const d = new Date(s + "T12:00:00"); d.setDate(d.getDate()+n); return ymd(d); }
-function dayDiff(a, b){
-  return Math.round((new Date(b+"T12:00:00") - new Date(a+"T12:00:00")) / 86400000);
-}
 const AYLAR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
 const GUNLER = ["Pazar","Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
 function dateLabel(s){
@@ -65,14 +85,15 @@ function lateLabel(s){
 const S = {
   uid:null, me:null, isAdmin:false,
   groups:[], lists:[], tasks:[], users:[],
-  settings:{ reminderEnabled:true, reminderTime:"11:00", includeUndated:true },
-  view:"today", search:"", composerDate:null, collapsed:{}, unsubs:[]
+  settings: normSettings(), sent: null,
+  view:"today", search:"", composerDate:null, collapsed:{}, openAcc:{}, unsubs:[]
 };
 try { S.collapsed = JSON.parse(localStorage.getItem("gt_collapsed") || "{}"); } catch(e){}
+try { S.openAcc = JSON.parse(localStorage.getItem("gt_acc") || '{"hatirlatma":true}'); } catch(e){}
 
 function toast(msg){
   const t = $("#toast"); t.textContent = msg; t.hidden = false;
-  clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2200);
+  clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2600);
 }
 
 /* ============ giriş ============ */
@@ -125,13 +146,16 @@ onAuthStateChanged(auth, async (user) => {
   }
   S.me = prof.data();
   S.isAdmin = S.me.role === "admin";
-  $("#sideName").textContent = S.me.displayName || S.me.username;
-  $("#sideRole").textContent = S.isAdmin ? "Yönetici" : "Kullanıcı";
-  $("#sideAvatar").textContent = (S.me.displayName || S.me.username || "?").charAt(0).toUpperCase();
-
+  paintMe();
   subscribe();
   setupPush();
 });
+
+function paintMe(){
+  $("#sideName").textContent = S.me.displayName || S.me.username;
+  $("#sideRole").textContent = S.isAdmin ? "Yönetici" : "Kullanıcı";
+  $("#sideAvatar").textContent = (S.me.displayName || S.me.username || "?").charAt(0).toUpperCase();
+}
 
 /* ============ veri ============ */
 function subscribe(){
@@ -143,12 +167,23 @@ function subscribe(){
   sub("groups", v => S.groups = v.sort((a,b) => (a.order||0)-(b.order||0)));
   sub("lists",  v => S.lists  = v.sort((a,b) => (a.order||0)-(b.order||0)));
   sub("tasks",  v => S.tasks  = v);
-  sub("users",  v => S.users  = v);
+  sub("users",  v => {
+    S.users = v;
+    const me = v.find(u => u.id === S.uid);
+    if (me) { S.me = me; paintMe(); }
+  });
 
   S.unsubs.push(onSnapshot(doc(db, "settings", "app"), (d) => {
-    if (d.exists()) S.settings = { ...S.settings, ...d.data() };
+    S.settings = normSettings(d.exists() ? d.data() : {});
     render();
   }, () => {}));
+
+  if (S.isAdmin) {
+    S.unsubs.push(onSnapshot(doc(db, "system", "sent"), (d) => {
+      S.sent = d.exists() ? d.data() : { keys: {}, log: [] };
+      if (S.view === "settings") render();
+    }, () => {}));
+  }
 }
 
 const visibleLists = () => S.isAdmin ? S.lists
@@ -164,13 +199,21 @@ const userName = (uid) => {
   return u ? (u.displayName || u.username) : "—";
 };
 
+function saveSettings(patch){
+  S.settings = { ...S.settings, ...patch };
+  const { reminders, includeUndated, nagEnabled, nagTimes } = S.settings;
+  return setDoc(doc(db, "settings", "app"),
+    { reminders, includeUndated, nagEnabled, nagTimes }, { merge: true })
+    .catch(e => toast("Kaydedilemedi: " + e.code));
+}
+
 /* ============ görev işlemleri ============ */
 async function addTask(title, dateStr, listId){
   const lid = listId || firstWritableList();
   if (!lid) { toast("Önce bir liste oluştur"); return; }
   await addDoc(collection(db, "tasks"), {
     title: title.trim(), note: "", listId: lid, date: dateStr || null,
-    done: false, doneAt: null, assignedTo: null,
+    done: false, doneAt: null, assignedTo: null, repeat: null, persistent: false,
     createdBy: S.uid, createdAt: Date.now()
   });
 }
@@ -181,7 +224,27 @@ function firstWritableList(){
 }
 const patchTask = (id, data) => updateDoc(doc(db, "tasks", id), data);
 const removeTask = (id) => deleteDoc(doc(db, "tasks", id));
+
 async function toggleDone(t){
+  // Tekrarlayan görev: bu seferki tamamlandı olarak kaydedilir, görev sonraki tarihe kayar
+  if (!t.done && isValidRule(t.repeat)) {
+    const occ = t.date || today();
+    const after = occ > today() ? occ : today();
+    const next = nextOccurrence(t.repeat, after, t.date || today());
+    await addDoc(collection(db, "tasks"), {
+      title: t.title, note: t.note || "", listId: t.listId, date: occ,
+      done: true, doneAt: Date.now(), assignedTo: t.assignedTo || null,
+      repeat: null, persistent: false, fromRepeat: t.id,
+      createdBy: S.uid, createdAt: Date.now()
+    });
+    if (next) {
+      await patchTask(t.id, { date: next });
+      toast(`Tamamlandı · sonraki: ${dateLabel(next)}`);
+    } else {
+      await patchTask(t.id, { done: true, doneAt: Date.now() });
+    }
+    return;
+  }
   await patchTask(t.id, { done: !t.done, doneAt: !t.done ? Date.now() : null });
 }
 
@@ -235,7 +298,7 @@ function renderSidebar(){
     const col = S.collapsed[grp.id] ? "collapsed" : "";
     html += `<div class="group ${col}" data-group="${grp.id}">
       <button class="group-head" data-toggle="${grp.id}">
-        <svg viewBox="0 0 24 24" class="chev"><path d="m6 9 6 6 6-6"/></svg>
+        <svg viewBox="0 0 24 24" class="chev">${ICONS.chev}</svg>
         <span class="group-name">${esc(grp.name)}</span>
       </button>
       <div class="group-body">${items.map(listRow).join("") ||
@@ -255,6 +318,8 @@ function taskRow(t, opts = {}){
   const meta = [];
   if (late) meta.push(`<span class="late">${svg("alert")}${lateLabel(t.date)}</span>`);
   else if (t.date && !opts.hideDate) meta.push(`<span>${svg("cal")}${dateLabel(t.date)}</span>`);
+  if (isValidRule(t.repeat) && !t.done) meta.push(`<span>${svg("repeat")}${esc(describe(t.repeat, t.date))}</span>`);
+  if (t.persistent && !t.done) meta.push(`<span class="nag">${svg("bell")}Israrlı</span>`);
   if (t.note) meta.push(`<span>${svg("note")}Not</span>`);
   if (t.assignedTo) meta.push(`<span>${svg("users")}${esc(userName(t.assignedTo))}</span>`);
   if (l) meta.push(`<span class="tag"><span class="d" style="background:${esc(l.color||"#6c7cff")}"></span>${esc(l.name)}</span>`);
@@ -274,6 +339,11 @@ function section(title, items, opts = {}){
     <div class="sec-head ${opts.danger?"danger":""}">${opts.icon?svg(opts.icon):""}${title}<span class="n">${items.length}</span></div>
     ${items.map(t => taskRow(t, opts)).join("")}
   </div>`;
+}
+
+function isEditing(){
+  const a = document.activeElement;
+  return a && $("#content").contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.type !== "checkbox";
 }
 
 function renderMain(){
@@ -332,8 +402,8 @@ function renderMain(){
       section("Tamamlanan", items.filter(x => x.done).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0)).slice(0,30))
     ) || empty("Bu listede görev yok.");
   }
-  else if (S.view === "settings") renderSettings();
-  else if (S.view === "users") renderUsers();
+  else if (S.view === "settings") { if (!isEditing()) renderSettings(); }
+  else if (S.view === "users") { if (!isEditing()) renderUsers(); }
 
   renderBanner();
 }
@@ -343,69 +413,224 @@ const empty = (msg) => `<div class="empty">${svg("check")}${esc(msg)}</div>`;
 function renderBanner(){
   const b = $("#reminderBanner");
   const g = groupTasks();
-  const seen = localStorage.getItem("gt_banner") === today();
-  if (S.view !== "today" || seen || (!g.late.length && !g.today.length)){ b.hidden = true; return; }
+  let seen = null;
+  try { seen = localStorage.getItem("gt_banner"); } catch(e){}
+  if (S.view !== "today" || seen === today() || (!g.late.length && !g.today.length)){ b.hidden = true; return; }
   b.hidden = false;
-  b.innerHTML = `${svg("clock")}<span>Bugün ${g.today.length} görevin var${g.late.length?`, ${g.late.length} tanesi gecikmiş`:""}.</span>
+  const msg = !g.today.length ? `${g.late.length} gecikmiş görevin var.`
+    : `Bugün ${g.today.length} görevin var${g.late.length ? `, ayrıca ${g.late.length} gecikmiş` : ""}.`;
+  b.innerHTML = `${svg("clock")}<span>${msg}</span>
     <button id="bannerClose">Tamam</button>`;
-  $("#bannerClose").onclick = () => { localStorage.setItem("gt_banner", today()); b.hidden = true; };
+  $("#bannerClose").onclick = () => { try { localStorage.setItem("gt_banner", today()); } catch(e){} b.hidden = true; };
 }
 
 /* ============ ayarlar ============ */
+function acc(key, title, sub, body){
+  const open = S.openAcc[key] ? "open" : "";
+  return `<details class="acc" data-acc="${key}" ${open}>
+    <summary><div><div class="acc-title">${title}</div>${sub?`<div class="acc-sub">${sub}</div>`:""}</div>
+      <svg viewBox="0 0 24 24" class="chev">${ICONS.chev}</svg></summary>
+    <div class="acc-body">${body}</div>
+  </details>`;
+}
+const sw = (attrs, on) => `<label class="sw"><input type="checkbox" ${attrs} ${on?"checked":""}><span></span></label>`;
+const TYPE_LABEL = { today: "Bugünün özeti", tomorrow: "Yarının görevleri" };
+
 function renderSettings(){
   $("#viewTitle").textContent = "Ayarlar";
-  $("#viewSub").textContent = "";
+  $("#viewSub").textContent = "Bölümlere dokunarak aç / kapat";
   const s = S.settings;
-  $("#content").innerHTML = `
-    <div class="sub-head">Sabah hatırlatması</div>
+
+  /* --- günlük hatırlatmalar --- */
+  const remRows = s.reminders.map((r, i) => `
+    <div class="rem">
+      <div class="rem-top">
+        <input type="text" class="rem-label" data-rem-label="${i}" value="${esc(r.label)}" placeholder="İsim">
+        ${sw(`data-rem-on="${i}"`, r.enabled !== false)}
+      </div>
+      <div class="rem-bottom">
+        <input type="time" data-rem-time="${i}" value="${esc(r.time)}">
+        <select data-rem-type="${i}">
+          <option value="today" ${r.type==="today"?"selected":""}>Bugünün özeti</option>
+          <option value="tomorrow" ${r.type==="tomorrow"?"selected":""}>Yarının görevleri</option>
+        </select>
+        <button class="icon-btn" data-rem-del="${i}" aria-label="Sil">${svg("trash")}</button>
+      </div>
+    </div>`).join("");
+  const remBody = `
+    <p class="help">Her biri seçtiğin saatte bildirim gönderir. "Bugünün özeti" bugünkü, gecikmiş ve tarihsiz görevleri; "Yarının görevleri" ertesi günü listeler.</p>
+    ${remRows || `<p class="help">Hiç hatırlatma yok.</p>`}
+    <button class="btn btn-block" id="remAdd" style="margin-top:10px">+ Hatırlatma ekle</button>
     <div class="row">
-      <div><div class="row-label">Hatırlatma açık</div><div class="row-sub">Her gün belirlenen saatte bildirim</div></div>
-      <label class="sw"><input type="checkbox" id="setEnabled" ${s.reminderEnabled!==false?"checked":""}><span></span></label>
-    </div>
+      <div><div class="row-label">Tarihsiz görevleri de göster</div><div class="row-sub">Bugün ekranında ve sabah özetinde</div></div>
+      ${sw(`id="setUndated"`, s.includeUndated !== false)}
+    </div>`;
+  const activeRem = s.reminders.filter(r => r.enabled !== false).map(r => r.time).join(", ") || "kapalı";
+
+  /* --- ısrarlı --- */
+  const nagCount = visibleTasks().filter(x => x.persistent && !x.done).length;
+  const nagBody = `
+    <p class="help">Görev ekranında "Israrlı" işaretlediğin görevler, tarihi gelmiş ve yapılmamışsa bu saatlerde tekrar tekrar bildirilir. Yapılana kadar her akşam devam eder.</p>
     <div class="row">
-      <div><div class="row-label">Saat</div><div class="row-sub">Bildirim bu saatte gönderilir</div></div>
-      <input type="time" id="setTime" value="${esc(s.reminderTime||"11:00")}">
+      <div class="row-label">Israrlı hatırlatma açık</div>
+      ${sw(`id="nagOn"`, s.nagEnabled !== false)}
     </div>
-    <div class="row">
-      <div><div class="row-label">Tarihsiz görevleri de ekle</div><div class="row-sub">Bugün ekranında ve hatırlatmada görünür</div></div>
-      <label class="sw"><input type="checkbox" id="setUndated" ${s.includeUndated!==false?"checked":""}><span></span></label>
+    <div class="chips" id="nagChips">${[...s.nagTimes].sort().map(tm => `
+      <span class="chip chip-time">${esc(tm)}<button data-nag-del="${esc(tm)}" aria-label="Kaldır">×</button></span>`).join("")}</div>
+    <div class="inline-add">
+      <input type="time" id="nagNew">
+      <button class="btn" id="nagAdd">Saat ekle</button>
     </div>
+    <p class="help" style="margin-top:10px">Şu an ${nagCount} ısrarlı görev var.</p>`;
+
+  /* --- cihaz --- */
+  const devBody = `
     <div class="row">
       <div><div class="row-label">Bu cihaza bildirim gönder</div><div class="row-sub" id="pushState">Durum kontrol ediliyor...</div></div>
       <button class="btn" id="pushBtn">İzin ver</button>
     </div>
+    <div class="row">
+      <div><div class="row-label">Bu cihazı test et</div><div class="row-sub">Cihazın bildirim gösterebildiğini kontrol eder</div></div>
+      <button class="btn" id="localTest">Dene</button>
+    </div>
+    <p class="help">Telefonda Chrome menüsünden "Ana ekrana ekle" dersen bildirimler daha güvenilir gelir.</p>`;
 
-    <div class="sub-head">Hangi listeler hatırlatılsın</div>
-    <div id="listReminders"></div>
+  /* --- listeler --- */
+  const listBody = (visibleLists().map(l => `
+    <div class="row">
+      <div class="row-label"><span class="dot" style="background:${esc(l.color||"#6c7cff")};display:inline-block;margin-right:8px"></span>${esc(l.name)}</div>
+      ${sw(`data-lrem="${l.id}"`, l.reminder !== false)}
+    </div>`).join("") || `<p class="help">Liste yok.</p>`) +
+    `<p class="help">Kapalı listeler sabah ve gece özetlerinde yer almaz. Israrlı görevler her zaman bildirilir.</p>`;
 
-    <div class="sub-head">Hesap</div>
+  /* --- gruplar --- */
+  const grpBody = (S.groups.map(g => `
+    <div class="row">
+      <input type="text" class="grow" data-grp-name="${g.id}" value="${esc(g.name)}">
+      <button class="icon-btn" data-grp-del="${g.id}" aria-label="Grubu sil">${svg("trash")}</button>
+    </div>`).join("") || `<p class="help">Grup yok.</p>`) +
+    `<p class="help">Grubu silince içindeki listeler silinmez, grupsuz kalır. Listeyi düzenlemek için listeyi açıp sağ üstteki ⋮ simgesine dokun.</p>`;
+
+  /* --- geçmiş --- */
+  const log = (S.sent?.log || []).slice(-15).reverse();
+  const histBody = `
+    ${log.length ? log.map(e => {
+      const dt = new Date(e.at);
+      return `<div class="hist">
+        <span class="hist-time">${dt.getDate()} ${AYLAR[dt.getMonth()].slice(0,3)} ${pad(dt.getHours())}:${pad(dt.getMinutes())}</span>
+        <span class="hist-label">${esc(e.label)}</span>
+        <span class="hist-n">${e.devices ? e.devices + " cihaz" : "görev yok"}</span>
+      </div>`; }).join("") : `<p class="help">Henüz kayıt yok.</p>`}
+    <button class="btn btn-block" id="histReset" style="margin-top:12px">Bugünün gönderim kaydını sıfırla</button>
+    <p class="help">Sıfırlarsan bugün saati geçmiş hatırlatmalar bir sonraki kontrolde (birkaç dakika içinde) tekrar gönderilir. Test için kullanabilirsin.</p>`;
+
+  /* --- hesap --- */
+  const accBody = `
     <div class="row"><div class="row-label">Kullanıcı adı</div><div style="color:var(--tx-2)">${esc(S.me.username)}</div></div>
     <div class="row">
-      <div class="row-label">Şifre değiştir</div>
+      <div class="row-label">Görünen ad</div>
+      <input type="text" id="myName" value="${esc(S.me.displayName || "")}">
+    </div>
+    <div class="row">
+      <div class="row-label">Şifre</div>
       <button class="btn" id="changePass">Değiştir</button>
     </div>
     ${S.isAdmin ? `<div class="row">
       <div><div class="row-label">Kullanıcılar ve paylaşım</div><div class="row-sub">${S.users.length} kullanıcı</div></div>
       <button class="btn" id="goUsers">Aç</button>
-    </div>` : ""}
-  `;
+    </div>` : ""}`;
 
-  $("#listReminders").innerHTML = visibleLists().map(l => `
-    <div class="row">
-      <div class="row-label"><span class="dot" style="background:${esc(l.color||"#6c7cff")};display:inline-block;margin-right:8px"></span>${esc(l.name)}</div>
-      <label class="sw"><input type="checkbox" data-rem="${l.id}" ${l.reminder!==false?"checked":""}><span></span></label>
-    </div>`).join("") || `<div style="color:var(--tx-3);font-size:13px;padding:8px 0">Liste yok.</div>`;
+  let html = "";
+  if (S.isAdmin) {
+    html += acc("hatirlatma", "Günlük hatırlatmalar", activeRem, remBody);
+    html += acc("israr", "Israrlı hatırlatma", s.nagEnabled !== false ? [...s.nagTimes].sort().join(", ") : "kapalı", nagBody);
+  }
+  html += acc("cihaz", "Bu cihazın bildirimleri", "", devBody);
+  if (S.isAdmin) {
+    html += acc("listeler", "Hangi listeler hatırlatılsın", "", listBody);
+    html += acc("gruplar", "Gruplar", `${S.groups.length} grup`, grpBody);
+    html += acc("gecmis", "Bildirim geçmişi", log[0] ? "son: " + esc(log[0].label) : "", histBody);
+  }
+  html += acc("hesap", "Hesap", "", accBody);
+  $("#content").innerHTML = html;
+  bindSettings();
+}
 
-  const save = (data) => setDoc(doc(db, "settings", "app"), { ...S.settings, ...data }, { merge:true });
-  $("#setEnabled").onchange = (e) => save({ reminderEnabled: e.target.checked });
-  $("#setTime").onchange = (e) => save({ reminderTime: e.target.value || "11:00" });
-  $("#setUndated").onchange = (e) => save({ includeUndated: e.target.checked });
-  $("#content").querySelectorAll("[data-rem]").forEach(el => {
-    el.onchange = () => updateDoc(doc(db, "lists", el.dataset.rem), { reminder: el.checked });
+function bindSettings(){
+  const C = $("#content");
+  C.querySelectorAll("details.acc").forEach(d => d.addEventListener("toggle", () => {
+    S.openAcc[d.dataset.acc] = d.open;
+    try { localStorage.setItem("gt_acc", JSON.stringify(S.openAcc)); } catch(e){}
+  }));
+
+  const rems = () => S.settings.reminders.map(r => ({ ...r }));
+  C.querySelectorAll("[data-rem-label]").forEach(el => el.onchange = () => {
+    const r = rems(); r[+el.dataset.remLabel].label = el.value.trim() || "Hatırlatma"; saveSettings({ reminders: r });
   });
+  C.querySelectorAll("[data-rem-time]").forEach(el => el.onchange = () => {
+    if (!el.value) return;
+    const r = rems(); r[+el.dataset.remTime].time = el.value; saveSettings({ reminders: r });
+  });
+  C.querySelectorAll("[data-rem-type]").forEach(el => el.onchange = () => {
+    const r = rems(); r[+el.dataset.remType].type = el.value; saveSettings({ reminders: r });
+  });
+  C.querySelectorAll("[data-rem-on]").forEach(el => el.onchange = () => {
+    const r = rems(); r[+el.dataset.remOn].enabled = el.checked; saveSettings({ reminders: r });
+  });
+  C.querySelectorAll("[data-rem-del]").forEach(el => el.onclick = () => {
+    const r = rems(); const x = r[+el.dataset.remDel];
+    if (!confirm(`"${x.label}" silinsin mi?`)) return;
+    r.splice(+el.dataset.remDel, 1); saveSettings({ reminders: r }); renderSettings();
+  });
+  $("#remAdd") && ($("#remAdd").onclick = () => {
+    const r = rems();
+    r.push({ id: "r" + Date.now().toString(36), label: "Yeni hatırlatma", time: "12:00", type: "today", enabled: true });
+    saveSettings({ reminders: r }); renderSettings();
+  });
+  $("#setUndated") && ($("#setUndated").onchange = (e) => saveSettings({ includeUndated: e.target.checked }));
+
+  $("#nagOn") && ($("#nagOn").onchange = (e) => saveSettings({ nagEnabled: e.target.checked }));
+  C.querySelectorAll("[data-nag-del]").forEach(el => el.onclick = () => {
+    saveSettings({ nagTimes: S.settings.nagTimes.filter(x => x !== el.dataset.nagDel) }); renderSettings();
+  });
+  $("#nagAdd") && ($("#nagAdd").onclick = () => {
+    const v = $("#nagNew").value;
+    if (!v) { toast("Önce saat seç"); return; }
+    if (S.settings.nagTimes.includes(v)) { toast("Bu saat zaten var"); return; }
+    saveSettings({ nagTimes: [...S.settings.nagTimes, v] }); renderSettings();
+  });
+
+  C.querySelectorAll("[data-lrem]").forEach(el => {
+    el.onchange = () => updateDoc(doc(db, "lists", el.dataset.lrem), { reminder: el.checked });
+  });
+  C.querySelectorAll("[data-grp-name]").forEach(el => el.onchange = () => {
+    const v = el.value.trim(); if (!v) return;
+    updateDoc(doc(db, "groups", el.dataset.grpName), { name: v }).then(() => toast("Grup adı değişti"));
+  });
+  C.querySelectorAll("[data-grp-del]").forEach(el => el.onclick = async () => {
+    const g = S.groups.find(x => x.id === el.dataset.grpDel);
+    if (!g || !confirm(`"${g.name}" grubu silinsin mi? İçindeki listeler grupsuz kalır.`)) return;
+    for (const l of S.lists.filter(l => l.groupId === g.id)) await updateDoc(doc(db, "lists", l.id), { groupId: null });
+    await deleteDoc(doc(db, "groups", g.id));
+    toast("Grup silindi");
+  });
+
+  $("#histReset") && ($("#histReset").onclick = async () => {
+    if (!confirm("Bugünün gönderim kaydı sıfırlansın mı?")) return;
+    const keys = { ...(S.sent?.keys || {}) };
+    Object.keys(keys).forEach(k => { if (k.startsWith(today())) delete keys[k]; });
+    await setDoc(doc(db, "system", "sent"), { keys, log: S.sent?.log || [] });
+    toast("Sıfırlandı");
+  });
+
+  $("#myName").onchange = (e) => {
+    const v = e.target.value.trim(); if (!v) return;
+    updateDoc(doc(db, "users", S.uid), { displayName: v }).then(() => toast("Kaydedildi"));
+  };
   $("#changePass").onclick = changePassword;
   if ($("#goUsers")) $("#goUsers").onclick = () => { S.view = "users"; render(); };
   $("#pushBtn").onclick = () => setupPush(true);
+  $("#localTest").onclick = localTest;
   refreshPushState();
 }
 
@@ -413,6 +638,7 @@ function renderUsers(){
   $("#viewTitle").textContent = "Kullanıcılar";
   $("#viewSub").textContent = "Listelere kişi ekle, görev ata";
   $("#content").innerHTML = `
+    <button class="text-btn" id="backSettings" style="margin-top:8px">‹ Ayarlara dön</button>
     <div class="sub-head">Kullanıcılar</div>
     ${S.users.map(u => `<div class="row">
       <div><div class="row-label">${esc(u.displayName || u.username)}</div>
@@ -434,6 +660,7 @@ function renderUsers(){
         `).join("") || `<span class="row-sub">Başka kullanıcı yok</span>`}</div>
       </div>`).join("")}
   `;
+  $("#backSettings").onclick = () => { S.view = "settings"; render(); };
   $("#nuAdd").onclick = createUser;
   $("#content").querySelectorAll("[data-member]").forEach(el => {
     el.onclick = async () => {
@@ -480,18 +707,23 @@ function changePassword(){
 }
 
 /* ============ bildirim ============ */
-let messaging = null;
+let messaging = null, swReg = null, fgBound = false;
+async function getReg(){
+  if (swReg) return swReg;
+  swReg = await navigator.serviceWorker.register(
+    "firebase-messaging-sw.js?c=" + encodeURIComponent(JSON.stringify(firebaseConfig)));
+  return swReg;
+}
 async function setupPush(ask = false){
   try {
-    if (!(await isSupported())) return;
+    if (!(await isSupported())) { if (ask) toast("Bu tarayıcı bildirim desteklemiyor"); return; }
     if (!("Notification" in window)) return;
     if (Notification.permission === "default" && !ask) return;
     if (Notification.permission !== "granted"){
       const r = await Notification.requestPermission();
       if (r !== "granted") { refreshPushState(); return; }
     }
-    const reg = await navigator.serviceWorker.register(
-      "firebase-messaging-sw.js?c=" + encodeURIComponent(JSON.stringify(firebaseConfig)));
+    const reg = await getReg();
     messaging = messaging || getMessaging(app);
     const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: reg });
     if (token){
@@ -499,11 +731,28 @@ async function setupPush(ask = false){
         token, uid: S.uid, updatedAt: Date.now(),
         agent: navigator.userAgent.slice(0, 120)
       });
-      onMessage(messaging, (p) => toast(p.notification?.title || "Yeni bildirim"));
+      if (!fgBound) {
+        fgBound = true;
+        // Uygulama açıkken gelen bildirimi de sistem bildirimi olarak göster
+        onMessage(messaging, (p) => {
+          const n = p.notification || {};
+          reg.showNotification(n.title || "Görevlerim", { body: n.body || "", icon: "icon-192.png" }).catch(() => {});
+          toast(n.title || "Yeni bildirim");
+        });
+      }
       if (ask) toast("Bu cihaz bildirimlere eklendi");
     }
   } catch (e) { console.warn("push", e); if (ask) toast("Bildirim kurulamadı: " + (e.code || e.message)); }
   refreshPushState();
+}
+async function localTest(){
+  if (!("Notification" in window) || Notification.permission !== "granted") {
+    toast("Önce bildirim izni ver"); return;
+  }
+  try {
+    const reg = await getReg();
+    await reg.showNotification("Görevlerim · test", { body: "Bu cihaz bildirimleri gösterebiliyor.", icon: "icon-192.png" });
+  } catch (e) { toast("Gösterilemedi: " + e.message); }
 }
 function refreshPushState(){
   const el = $("#pushState"); if (!el) return;
@@ -515,10 +764,40 @@ function refreshPushState(){
 }
 
 /* ============ görev paneli ============ */
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+function repeatEditor(rule){
+  const type = rule?.type || "none";
+  const opt = (v, l) => `<button class="chip ${type===v?"sel":""}" data-rt="${v}">${l}</button>`;
+  let sub = "";
+  if (type === "interval") {
+    sub = `<div class="inline-add"><span class="row-sub" style="align-self:center">Kaç günde bir</span>
+      <input type="number" id="rEvery" min="1" max="365" value="${esc(rule.every || 2)}" style="max-width:90px"></div>`;
+  } else if (type === "weekly") {
+    sub = `<div class="chips">${WEEK_ORDER.map(d =>
+      `<button class="chip ${(rule.days||[]).includes(d)?"sel":""}" data-wd="${d}">${GUN_KISA[d]}</button>`).join("")}</div>`;
+  } else if (type === "monthly") {
+    let cells = "";
+    for (let i = 1; i <= 31; i++) cells += `<button class="dcell ${(rule.days||[]).includes(i)?"sel":""}" data-md="${i}">${i}</button>`;
+    sub = `<p class="row-sub" style="margin:10px 0 6px">Ayın hangi günleri (birden fazla seçebilirsin)</p>
+      <div class="daygrid">${cells}</div>
+      <div class="chips"><button class="chip ${rule.last?"sel":""}" data-mlast="1">Ayın son günü</button></div>`;
+  } else if (type === "yearly") {
+    sub = `<p class="row-sub" style="margin-top:8px">Görevin tarihindeki gün ve ayda, her yıl tekrarlanır.</p>`;
+  }
+  return `<div class="chips" style="margin-top:6px">
+      ${opt("none","Yok")}${opt("daily","Her gün")}${opt("interval","Her N günde")}
+      ${opt("weekly","Haftalık")}${opt("monthly","Aylık")}${opt("yearly","Yıllık")}
+    </div>${sub}`;
+}
+
 function openTask(id){
   const t = S.tasks.find(x => x.id === id); if (!t) return;
   const sheet = $("#sheet");
-  $("#sheetTitle").textContent = "Görev";
+  // panelde düzenlenen geçici kopya
+  const E = { rule: t.repeat ? JSON.parse(JSON.stringify(t.repeat)) : null, persistent: !!t.persistent };
+
+  $("#sheetTitle").textContent = t.fromRepeat ? "Tamamlanan tekrar" : "Görev";
   $("#sheetContent").innerHTML = `
     <label class="field"><span>Başlık</span><input type="text" id="tTitle" value="${esc(t.title)}"></label>
     <label class="field"><span>Not</span><textarea id="tNote" placeholder="Detay, adres, telefon...">${esc(t.note||"")}</textarea></label>
@@ -532,6 +811,17 @@ function openTask(id){
       <button class="chip" data-quick="${addDays(today(),7)}">+1 hafta</button>
       <button class="chip" data-quick="">Tarihsiz</button>
     </div>
+    ${t.fromRepeat ? "" : `
+    <div class="block">
+      <div class="row-label">${svg("repeat")} Tekrar</div>
+      <div id="repeatBox"></div>
+      <p class="row-sub" id="repeatInfo" style="margin-top:8px"></p>
+    </div>
+    <div class="row">
+      <div><div class="row-label">${svg("bell")} Israrlı hatırlatma</div>
+      <div class="row-sub">Yapılmazsa ${esc([...S.settings.nagTimes].sort().join(" · ") || "—")}</div></div>
+      ${sw(`id="tNag"`, E.persistent)}
+    </div>`}
     <div class="row">
       <div class="row-label">Liste</div>
       <select id="tList">${visibleLists().map(l =>
@@ -545,18 +835,68 @@ function openTask(id){
     <button class="btn btn-primary btn-block" id="tSave" style="margin-top:16px">Kaydet</button>
   `;
   sheet.hidden = false;
-  sheet.querySelectorAll("[data-quick]").forEach(b => b.onclick = () => { $("#tDate").value = b.dataset.quick; });
+
+  const paintRepeat = () => {
+    const box = $("#repeatBox"); if (!box) return;
+    box.innerHTML = repeatEditor(E.rule);
+    const dateVal = $("#tDate").value || null;
+    let info = "";
+    if (E.rule && isValidRule(E.rule)) {
+      const first = dateVal || firstOccurrence(E.rule, today(), today());
+      const next = nextOccurrence(E.rule, first, first);
+      info = `${describe(E.rule, first)} · ${dateVal ? "sıradaki" : "ilk"}: ${dateLabel(first)}${next ? ", sonra " + dateLabel(next) : ""}`;
+    } else if (E.rule) {
+      info = "Gün seçmeden tekrar kaydedilmez.";
+    }
+    $("#repeatInfo").textContent = info;
+
+    box.querySelectorAll("[data-rt]").forEach(b => b.onclick = () => {
+      const v = b.dataset.rt;
+      if (v === "none") E.rule = null;
+      else if (v === "interval") E.rule = { type: v, every: 2 };
+      else if (v === "weekly") E.rule = { type: v, days: [new Date((dateVal||today()) + "T12:00:00").getDay()] };
+      else if (v === "monthly") E.rule = { type: v, days: [new Date((dateVal||today()) + "T12:00:00").getDate()], last: false };
+      else E.rule = { type: v };
+      paintRepeat();
+    });
+    box.querySelectorAll("[data-wd]").forEach(b => b.onclick = () => {
+      const d = +b.dataset.wd, s = new Set(E.rule.days || []);
+      s.has(d) ? s.delete(d) : s.add(d); E.rule.days = [...s]; paintRepeat();
+    });
+    box.querySelectorAll("[data-md]").forEach(b => b.onclick = () => {
+      const d = +b.dataset.md, s = new Set(E.rule.days || []);
+      s.has(d) ? s.delete(d) : s.add(d); E.rule.days = [...s].sort((a,b)=>a-b); paintRepeat();
+    });
+    const ml = box.querySelector("[data-mlast]");
+    if (ml) ml.onclick = () => { E.rule.last = !E.rule.last; paintRepeat(); };
+    const ev = $("#rEvery");
+    if (ev) ev.onchange = () => { E.rule.every = Math.max(1, Math.min(365, parseInt(ev.value, 10) || 1)); paintRepeat(); };
+  };
+  paintRepeat();
+  $("#tDate").addEventListener("change", paintRepeat);
+  if ($("#tNag")) $("#tNag").onchange = (e) => { E.persistent = e.target.checked; };
+
+  sheet.querySelectorAll("[data-quick]").forEach(b => b.onclick = () => { $("#tDate").value = b.dataset.quick; paintRepeat(); });
   $("#sheetDelete").onclick = async () => {
-    if (!confirm("Görev silinsin mi?")) return;
+    if (!confirm(isValidRule(t.repeat) ? "Tekrarlayan görev tamamen silinsin mi?" : "Görev silinsin mi?")) return;
     await removeTask(t.id); sheet.hidden = true; toast("Silindi");
   };
   $("#tSave").onclick = async () => {
     const title = $("#tTitle").value.trim();
     if (!title) { toast("Başlık boş olamaz"); return; }
-    await patchTask(t.id, {
-      title, note: $("#tNote").value.trim(), date: $("#tDate").value || null,
+    let date = $("#tDate").value || null;
+    let repeat = null;
+    if (!t.fromRepeat && E.rule) {
+      if (!isValidRule(E.rule)) { toast("Tekrar için gün seç ya da \"Yok\" de"); return; }
+      repeat = E.rule;
+      if (!date) date = firstOccurrence(repeat, today(), today());
+    }
+    const data = {
+      title, note: $("#tNote").value.trim(), date,
       listId: $("#tList").value, assignedTo: $("#tUser").value || null
-    });
+    };
+    if (!t.fromRepeat) { data.repeat = repeat; data.persistent = E.persistent; }
+    await patchTask(t.id, data);
     sheet.hidden = true; toast("Kaydedildi");
   };
 }
@@ -578,7 +918,7 @@ document.querySelectorAll("[data-close]").forEach(el => {
 });
 
 function listDialog(existing){
-  const l = existing || { name:"", color:COLORS[0], groupId:"", reminder:true };
+  const l = existing ? { ...existing } : { name:"", color:COLORS[0], groupId:"", reminder:true };
   openDialog(existing ? "Listeyi düzenle" : "Yeni liste", `
     <label class="field"><span>Liste adı</span><input type="text" id="lName" value="${esc(l.name)}" placeholder="Örn. Serik"></label>
     <label class="field"><span>Grup</span>
@@ -616,7 +956,7 @@ function listDialog(existing){
 function groupDialog(){
   openDialog("Yeni grup", `
     <label class="field"><span>Grup adı</span><input type="text" id="gName" placeholder="Örn. Domino's Pizza"></label>
-    <span class="row-sub">Gruplar listeleri bir arada tutar. Sonradan yeniden adlandırabilirsin.</span>
+    <span class="row-sub">Gruplar listeleri bir arada tutar. Ayarlar > Gruplar'dan yeniden adlandırabilirsin.</span>
   `, async () => {
     const name = $("#gName").value.trim();
     if (!name) return false;
@@ -637,7 +977,7 @@ $("#sidebar").addEventListener("click", (e) => {
   if (g){
     const id = g.dataset.toggle;
     S.collapsed[id] = !S.collapsed[id];
-    localStorage.setItem("gt_collapsed", JSON.stringify(S.collapsed));
+    try { localStorage.setItem("gt_collapsed", JSON.stringify(S.collapsed)); } catch(e){}
     renderSidebar();
   }
 });
