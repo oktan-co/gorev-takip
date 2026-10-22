@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Sadece "users" altında kartı olan hesaplar veriye erişir.
+    // Böylece Firebase'e kendi kendine kaydolan biri hiçbir şey göremez.
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function known() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    function isAdmin() { return known() && profile().role == 'admin'; }
+
+    function listOf(listId) {
+      return get(/databases/$(database)/documents/lists/$(listId)).data;
+    }
+    function memberOfList(listId) {
+      return known() && (
+        isAdmin() ||
+        listOf(listId).ownerUid == request.auth.uid ||
+        request.auth.uid in listOf(listId).get('members', [])
+      );
+    }
+
+    // Kullanıcı kartları. İlk yönetici kartı Firebase konsolundan elle eklenir.
+    match /users/{uid} {
+      allow read: if known();
+      allow create, delete: if isAdmin();
+      // Kişi kendi görünen adını değiştirebilir, rolünü değiştiremez.
+      allow update: if isAdmin() ||
+        (known() && request.auth.uid == uid &&
+         request.resource.data.role == resource.data.role);
+    }
+
+    match /groups/{id} {
+      allow read: if known();
+      allow write: if isAdmin();
+    }
+
+    match /lists/{id} {
+      allow read: if known();
+      allow write: if isAdmin();
+    }
+
+    match /tasks/{id} {
+      allow read: if known() && (
+        isAdmin() ||
+        resource.data.assignedTo == request.auth.uid ||
+        memberOfList(resource.data.listId)
+      );
+      allow create: if known() && memberOfList(request.resource.data.listId);
+      allow update, delete: if known() && (
+        isAdmin() ||
+        resource.data.assignedTo == request.auth.uid ||
+        memberOfList(resource.data.listId)
+      );
+    }
+
+    match /settings/{id} {
+      allow read: if known();
+      allow write: if isAdmin();
+    }
+
+    // Bildirim için cihaz anahtarları: herkes kendi cihazını kaydeder.
+    match /tokens/{id} {
+      allow read: if isAdmin();
+      allow create, update: if known() && request.resource.data.uid == request.auth.uid;
+      allow delete: if known() && resource.data.uid == request.auth.uid;
+    }
+  }
+}
