@@ -1,18 +1,12 @@
-// Firebase bilgilerini buraya yapıştır.
-// Firebase Console > Proje ayarları > Genel > Web uygulaması > SDK kurulumu
 export const firebaseConfig = {
-  apiKey: "BURAYA_API_KEY",
-  authDomain: "PROJE-ADI.firebaseapp.com",
-  projectId: "PROJE-ADI",
-  storageBucket: "PROJE-ADI.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:xxxxxxxxxxxxxxxx"
+  apiKey: "AIzaSyAmRPifdCYRY7Ar3v95y5sI0i-pWgVl7ts",
+  authDomain: "gorev-takip-48bc4.firebaseapp.com",
+  projectId: "gorev-takip-48bc4",
+  storageBucket: "gorev-takip-48bc4.firebasestorage.app",
+  messagingSenderId: "746239646445",
+  appId: "1:746239646445:web:58edf5a7f2c06c168c8ae4"
 };
 
-// Bildirimler için: Firebase Console > Proje ayarları > Cloud Messaging >
-// Web yapılandırması > Web Push sertifikaları > Anahtar çifti oluştur
-export const vapidKey = "BURAYA_VAPID_ANAHTARI";
+export const vapidKey = "BKOR45OKDyRhLS-TsYF4SVIuiZBwMVMEfS78WdSx3r6a_sxLuSWDogneLJawDoIXkadxDPN5tBMc-OCnyOsSo5Q";
 
-// Kullanıcı adları Firebase'de bu alan adıyla saklanır (admin -> admin@gorev.local).
-// Gerçek bir e-posta adresi olması gerekmez, değiştirmene gerek yok.
 export const userDomain = "gorev.local";
