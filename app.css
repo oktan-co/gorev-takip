@@ -280,3 +280,7 @@ input[type=number]{background:var(--bg-3);border:1px solid var(--line);border-ra
 /* hatırlatma satırları */
 .remrow{display:flex;gap:8px;align-items:center;margin:6px 0}
 .remrow input{flex:1;min-width:0;background:var(--bg-3);border:1px solid var(--line);border-radius:9px;padding:8px 10px;outline:none}
+
+/* not: açılır kapanır */
+#tNote{width:100%;min-height:84px;resize:vertical;background:var(--bg-3);border:1px solid var(--line);border-radius:9px;padding:9px 11px;outline:none;margin-top:4px}
+#tNote:focus{border-color:var(--acc)}

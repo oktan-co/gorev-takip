@@ -918,7 +918,10 @@ function openTask(id){
       <button class="step-add" id="stepAdd" type="button">+ Adım ekle</button>
     </div>
     `}
-    <label class="field"><span>Not</span><textarea id="tNote" placeholder="Detay, adres, telefon...">${esc(t.note||"")}</textarea></label>
+    <details class="block rep-acc" id="noteAcc" ${t.note ? "open" : ""}>
+      <summary><span class="row-label">${svg("note")} Not</span><span class="rep-sum" id="noteSum"></span><svg viewBox="0 0 24 24" class="chev">${ICONS.chev}</svg></summary>
+      <textarea id="tNote" placeholder="Detay, adres, telefon...">${esc(t.note||"")}</textarea>
+    </details>
     <div class="row">
       <div class="row-label">Tarih</div>
       <input type="date" id="tDate" value="${esc(t.date||"")}">
@@ -1023,6 +1026,14 @@ function openTask(id){
   };
   if (t.fromRepeat) { if ($("#stepAdd")) $("#stepAdd").hidden = true; }
   paintSteps();
+
+  /* not: açılır kapanır; kapalıyken yanında ilk satırı görünür */
+  const sumNote = () => {
+    const v = $("#tNote").value.trim().split("\n")[0];
+    $("#noteSum").textContent = v || "Yok";
+  };
+  sumNote();
+  $("#tNote").addEventListener("input", sumNote);
 
   /* hatırlatmalar: Kaydet'e basınca kaydedilir */
   const sumRems = () => {
