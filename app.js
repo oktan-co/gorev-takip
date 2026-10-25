@@ -88,7 +88,7 @@ const S = {
   uid:null, me:null, isAdmin:false,
   groups:[], lists:[], tasks:[], users:[],
   settings: normSettings(), sent: null,
-  view:"today", search:"", composerDate:null, collapsed:{}, openAcc:{}, unsubs:[]
+  view:(()=>{ try { return localStorage.getItem("gt_view") || "today"; } catch(e){ return "today"; } })(), search:"", composerDate:null, collapsed:{}, openAcc:{}, unsubs:[]
 };
 try { S.collapsed = JSON.parse(localStorage.getItem("gt_collapsed") || "{}"); } catch(e){}
 try { S.openAcc = JSON.parse(localStorage.getItem("gt_acc") || '{"hatirlatma":true}'); } catch(e){}
@@ -265,6 +265,7 @@ function groupTasks(){
 }
 
 function render(){
+  try { if (S.view) localStorage.setItem("gt_view", S.view); } catch(e){}
   renderSidebar();
   renderMain();
 }
@@ -389,7 +390,7 @@ function renderMain(){
   }
   else if (S.view.startsWith("list:")){
     const l = listById(S.view.slice(5));
-    if (!l){ S.view = "today"; return render(); }
+    if (!l){ if (!S.lists.length) { c.innerHTML = ""; return; } S.view = "today"; return render(); } // listeler henüz yüklenmediyse bekle
     const q = S.search.trim().toLowerCase();
     const items = visibleTasks().filter(x => x.listId === l.id &&
       (!q || (x.title||"").toLowerCase().includes(q) || (x.note||"").toLowerCase().includes(q)));
