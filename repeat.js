@@ -4,6 +4,7 @@
 //   { type: "interval", every: 3 }                 // 3 günde bir
 //   { type: "weekly", days: [1, 4] }               // 0=Pazar, 1=Pazartesi ... 6=Cumartesi
 //   { type: "monthly", days: [10, 15, 20], last: false }
+//   { type: "monthly", months: 3, days: [10] }     // 3 ayda bir, ayın 10'u (31 → ay sonu)
 //   { type: "yearly" }                             // görevin tarihindeki gün/ay
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -27,6 +28,13 @@ export function matches(rule, dateStr, anchorStr) {
     }
     case "weekly": return (rule.days || []).includes(d.getDay());
     case "monthly": {
+      // months: 1 = her ay, 3 = 3 ayda bir ... (ay sırası görevin tarihinden başlar)
+      const step = Math.max(1, Number(rule.months) || 1);
+      if (step > 1) {
+        const a = parse(anchorStr || dateStr);
+        const md = (d.getFullYear() - a.getFullYear()) * 12 + d.getMonth() - a.getMonth();
+        if (md < 0 || md % step !== 0) return false;
+      }
       const dom = d.getDate(), last = lastDayOfMonth(d);
       const days = rule.days || [];
       if (days.includes(dom)) return true;
@@ -81,7 +89,8 @@ export function describe(rule, anchorStr) {
     case "monthly": {
       const ds = [...(rule.days || [])].sort((a, b) => a - b).map(String);
       if (rule.last) ds.push("son gün");
-      return "Her ay " + ds.join(", ");
+      const step = Math.max(1, Number(rule.months) || 1);
+      return (step > 1 ? `${step} ayda bir, ayın ` : "Her ay ") + ds.join(", ");
     }
     case "yearly": {
       if (!anchorStr) return "Her yıl";

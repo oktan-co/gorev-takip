@@ -29,12 +29,14 @@ const DEFAULT_SETTINGS = {
   ],
   includeUndated: true,
   nagEnabled: true,
-  nagTimes: ["21:00", "22:00", "23:00", "23:30", "23:40", "23:50"]
+  nagTimes: ["21:00", "22:00", "23:00", "23:30", "23:40", "23:50"],
+  repeatPresets: []
 };
 function normSettings(s = {}) {
   const o = { ...DEFAULT_SETTINGS, ...s };
   if (!Array.isArray(o.reminders)) o.reminders = DEFAULT_SETTINGS.reminders.map(r => ({ ...r }));
   if (!Array.isArray(o.nagTimes)) o.nagTimes = [...DEFAULT_SETTINGS.nagTimes];
+  if (!Array.isArray(o.repeatPresets)) o.repeatPresets = [];
   return o;
 }
 
@@ -201,9 +203,9 @@ const userName = (uid) => {
 
 function saveSettings(patch){
   S.settings = { ...S.settings, ...patch };
-  const { reminders, includeUndated, nagEnabled, nagTimes } = S.settings;
+  const { reminders, includeUndated, nagEnabled, nagTimes, repeatPresets } = S.settings;
   return setDoc(doc(db, "settings", "app"),
-    { reminders, includeUndated, nagEnabled, nagTimes }, { merge: true })
+    { reminders, includeUndated, nagEnabled, nagTimes, repeatPresets }, { merge: true })
     .catch(e => toast("Kaydedilemedi: " + e.code));
 }
 
@@ -290,6 +292,25 @@ function renderSidebar(){
       ${(l.members||[]).length ? `<span class="li-shared">${svg("users")}</span>` : ""}
       <span class="li-count">${openCount(l.id) || ""}</span>
     </button>`;
+
+  /* --- kayıtlı tekrar kuralları --- */
+  const presets = s.repeatPresets || [];
+  const presetRows = presets.map((p, i) => {
+    const open = S.editPreset === p.id;
+    const ok = isValidRule(p.rule);
+    return `<div class="rem">
+      <div class="rem-top">
+        <input type="text" class="rem-label" data-pr-name="${i}" value="${esc(p.name)}" placeholder="İsim (ör. 3 ayda bir ödeme)">
+        <button class="icon-btn" data-pr-del="${i}" aria-label="Sil">${svg("trash")}</button>
+      </div>
+      <div class="row-sub" style="margin:6px 0">${ok ? esc(describe(p.rule)) : "Gün seçilmemiş, görevlerde görünmez"}</div>
+      <button class="btn" data-pr-edit="${i}">${open ? "Kapat" : "Kuralı düzenle"}</button>
+      ${open ? `<div class="pr-editor" data-pr-box="${i}" style="margin-top:8px"></div>` : ""}
+    </div>`; }).join("");
+  const presetBody = `
+    <p class="help">Burada kendi tekrar kurallarını hazırlarsın (ör. "3 ayda bir, ayın 10'u"). Kaydettiklerin görev ekranında Tekrar bölümünde tek dokunuşla seçilir.</p>
+    ${presetRows || `<p class="help">Henüz kural yok.</p>`}
+    <button class="btn btn-block" id="prAdd" style="margin-top:10px">+ Kural ekle</button>`;
 
   let html = "";
   for (const grp of S.groups){
@@ -543,6 +564,7 @@ function renderSettings(){
   let html = "";
   if (S.isAdmin) {
     html += acc("hatirlatma", "Günlük hatırlatmalar", activeRem, remBody);
+    html += acc("tekrar", "Tekrar kuralları", `${presets.length} kural`, presetBody);
     html += acc("israr", "Israrlı hatırlatma", s.nagEnabled !== false ? [...s.nagTimes].sort().join(", ") : "kapalı", nagBody);
   }
   html += acc("cihaz", "Bu cihazın bildirimleri", "", devBody);
@@ -587,6 +609,38 @@ function bindSettings(){
     r.push({ id: "r" + Date.now().toString(36), label: "Yeni hatırlatma", time: "12:00", type: "today", enabled: true });
     saveSettings({ reminders: r }); renderSettings();
   });
+  /* kayıtlı tekrar kuralları */
+  const prs = () => S.settings.repeatPresets.map(p => ({ ...p, rule: JSON.parse(JSON.stringify(p.rule)) }));
+  $("#prAdd") && ($("#prAdd").onclick = () => {
+    const a = prs(), id = "p" + Date.now().toString(36);
+    a.push({ id, name: "Yeni kural", rule: { type: "monthly", months: 3, days: [10], last: false } });
+    S.editPreset = id; saveSettings({ repeatPresets: a }); renderSettings();
+  });
+  C.querySelectorAll("[data-pr-name]").forEach(el => el.onchange = () => {
+    const a = prs(); a[+el.dataset.prName].name = el.value.trim() || "Kural"; saveSettings({ repeatPresets: a });
+  });
+  C.querySelectorAll("[data-pr-del]").forEach(el => el.onclick = () => {
+    const a = prs(), x = a[+el.dataset.prDel];
+    if (!confirm(`"${x.name}" silinsin mi? Bu kuralla kurulmuş görevler etkilenmez.`)) return;
+    a.splice(+el.dataset.prDel, 1); saveSettings({ repeatPresets: a }); renderSettings();
+  });
+  C.querySelectorAll("[data-pr-edit]").forEach(el => el.onclick = () => {
+    const id = S.settings.repeatPresets[+el.dataset.prEdit].id;
+    S.editPreset = S.editPreset === id ? null : id; renderSettings();
+  });
+  C.querySelectorAll("[data-pr-box]").forEach(box => {
+    const i = +box.dataset.prBox;
+    const E = { rule: JSON.parse(JSON.stringify(S.settings.repeatPresets[i].rule)) };
+    const paint = () => {
+      box.innerHTML = repeatEditor(E.rule);
+      bindRepeatEditor(box, E, () => null, () => {
+        if (!E.rule) { toast("Kural boş olamaz"); E.rule = JSON.parse(JSON.stringify(S.settings.repeatPresets[i].rule)); paint(); return; }
+        const a = prs(); a[i].rule = E.rule; saveSettings({ repeatPresets: a }); renderSettings();
+      });
+    };
+    paint();
+  });
+
   $("#setUndated") && ($("#setUndated").onchange = (e) => saveSettings({ includeUndated: e.target.checked }));
 
   $("#nagOn") && ($("#nagOn").onchange = (e) => saveSettings({ nagEnabled: e.target.checked }));
@@ -779,7 +833,10 @@ function repeatEditor(rule){
   } else if (type === "monthly") {
     let cells = "";
     for (let i = 1; i <= 31; i++) cells += `<button class="dcell ${(rule.days||[]).includes(i)?"sel":""}" data-md="${i}">${i}</button>`;
-    sub = `<p class="row-sub" style="margin:10px 0 6px">Ayın hangi günleri (birden fazla seçebilirsin)</p>
+    const mm = rule.months || 1;
+    const mOpt = (n, l) => `<button class="chip ${mm===n?"sel":""}" data-mm="${n}">${l}</button>`;
+    sub = `<div class="chips" style="margin-top:10px">${mOpt(1,"Her ay")}${mOpt(2,"2 ayda bir")}${mOpt(3,"3 ayda bir")}${mOpt(6,"6 ayda bir")}</div>
+      <p class="row-sub" style="margin:10px 0 6px">Ayın hangi günleri (birden fazla seçebilirsin)</p>
       <div class="daygrid">${cells}</div>
       <div class="chips"><button class="chip ${rule.last?"sel":""}" data-mlast="1">Ayın son günü</button></div>`;
   } else if (type === "yearly") {
@@ -789,6 +846,33 @@ function repeatEditor(rule){
       ${opt("none","Yok")}${opt("daily","Her gün")}${opt("interval","Her N günde")}
       ${opt("weekly","Haftalık")}${opt("monthly","Aylık")}${opt("yearly","Yıllık")}
     </div>${sub}`;
+}
+
+/* tekrar kuralı düzenleyicisinin tıklamalarını bağlar (görev panelinde ve ayarlarda ortak) */
+function bindRepeatEditor(box, E, getDate, repaint){
+  const ref = () => new Date((getDate() || today()) + "T12:00:00");
+  box.querySelectorAll("[data-rt]").forEach(b => b.onclick = () => {
+    const v = b.dataset.rt;
+    if (v === "none") E.rule = null;
+    else if (v === "interval") E.rule = { type: v, every: 2 };
+    else if (v === "weekly") E.rule = { type: v, days: [ref().getDay()] };
+    else if (v === "monthly") E.rule = { type: v, days: [ref().getDate()], last: false };
+    else E.rule = { type: v };
+    repaint();
+  });
+  box.querySelectorAll("[data-wd]").forEach(b => b.onclick = () => {
+    const d = +b.dataset.wd, s = new Set(E.rule.days || []);
+    s.has(d) ? s.delete(d) : s.add(d); E.rule.days = [...s]; repaint();
+  });
+  box.querySelectorAll("[data-md]").forEach(b => b.onclick = () => {
+    const d = +b.dataset.md, s = new Set(E.rule.days || []);
+    s.has(d) ? s.delete(d) : s.add(d); E.rule.days = [...s].sort((a,b)=>a-b); repaint();
+  });
+  box.querySelectorAll("[data-mm]").forEach(b => b.onclick = () => { E.rule.months = +b.dataset.mm; repaint(); });
+  const ml = box.querySelector("[data-mlast]");
+  if (ml) ml.onclick = () => { E.rule.last = !E.rule.last; repaint(); };
+  const ev = box.querySelector("#rEvery");
+  if (ev) ev.onchange = () => { E.rule.every = Math.max(1, Math.min(365, parseInt(ev.value, 10) || 1)); repaint(); };
 }
 
 function openTask(id){
@@ -838,7 +922,14 @@ function openTask(id){
 
   const paintRepeat = () => {
     const box = $("#repeatBox"); if (!box) return;
-    box.innerHTML = repeatEditor(E.rule);
+    const presets = (S.settings.repeatPresets || []).filter(p => p && isValidRule(p.rule));
+    const presetRow = presets.length ? `<p class="row-sub" style="margin:6px 0 2px">Kayıtlı kurallar</p><div class="chips">${presets.map(p =>
+      `<button class="chip ${E.rule && JSON.stringify(E.rule)===JSON.stringify(p.rule)?"sel":""}" data-preset="${esc(p.id)}">${esc(p.name)}</button>`).join("")}</div>` : "";
+    box.innerHTML = presetRow + repeatEditor(E.rule);
+    box.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => {
+      const p = presets.find(x => x.id === b.dataset.preset);
+      if (p) { E.rule = JSON.parse(JSON.stringify(p.rule)); paintRepeat(); }
+    });
     const dateVal = $("#tDate").value || null;
     let info = "";
     if (E.rule && isValidRule(E.rule)) {
@@ -850,27 +941,7 @@ function openTask(id){
     }
     $("#repeatInfo").textContent = info;
 
-    box.querySelectorAll("[data-rt]").forEach(b => b.onclick = () => {
-      const v = b.dataset.rt;
-      if (v === "none") E.rule = null;
-      else if (v === "interval") E.rule = { type: v, every: 2 };
-      else if (v === "weekly") E.rule = { type: v, days: [new Date((dateVal||today()) + "T12:00:00").getDay()] };
-      else if (v === "monthly") E.rule = { type: v, days: [new Date((dateVal||today()) + "T12:00:00").getDate()], last: false };
-      else E.rule = { type: v };
-      paintRepeat();
-    });
-    box.querySelectorAll("[data-wd]").forEach(b => b.onclick = () => {
-      const d = +b.dataset.wd, s = new Set(E.rule.days || []);
-      s.has(d) ? s.delete(d) : s.add(d); E.rule.days = [...s]; paintRepeat();
-    });
-    box.querySelectorAll("[data-md]").forEach(b => b.onclick = () => {
-      const d = +b.dataset.md, s = new Set(E.rule.days || []);
-      s.has(d) ? s.delete(d) : s.add(d); E.rule.days = [...s].sort((a,b)=>a-b); paintRepeat();
-    });
-    const ml = box.querySelector("[data-mlast]");
-    if (ml) ml.onclick = () => { E.rule.last = !E.rule.last; paintRepeat(); };
-    const ev = $("#rEvery");
-    if (ev) ev.onchange = () => { E.rule.every = Math.max(1, Math.min(365, parseInt(ev.value, 10) || 1)); paintRepeat(); };
+    bindRepeatEditor(box, E, () => $("#tDate").value || null, paintRepeat);
   };
   paintRepeat();
   $("#tDate").addEventListener("change", paintRepeat);
