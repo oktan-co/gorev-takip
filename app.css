@@ -246,3 +246,8 @@ input[type=number]{background:var(--bg-3);border:1px solid var(--line);border-ra
   .sheet{align-items:center}
   .sheet-body{border-radius:18px}
 }
+
+/* sürükle-bırak */
+.task[draggable="true"]{-webkit-user-drag:element}
+.task.dragging{opacity:.45}
+.li.drop-over{background:var(--acc-soft);outline:2px dashed var(--acc);outline-offset:-2px}

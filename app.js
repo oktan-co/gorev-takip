@@ -314,6 +314,8 @@ function renderSidebar(){
   $("#addListBtn").hidden = !S.isAdmin;
 }
 
+const canDrag = () => window.matchMedia("(min-width:821px)").matches;
+
 function taskRow(t, opts = {}){
   const l = listById(t.listId);
   const late = t.date && t.date < today() && !t.done;
@@ -325,7 +327,7 @@ function taskRow(t, opts = {}){
   if (t.note) meta.push(`<span>${svg("note")}Not</span>`);
   if (t.assignedTo) meta.push(`<span>${svg("users")}${esc(userName(t.assignedTo))}</span>`);
   if (l) meta.push(`<span class="tag"><span class="d" style="background:${esc(l.color||"#6c7cff")}"></span>${esc(l.name)}</span>`);
-  return `<div class="task ${t.done?"done":""}" data-task="${t.id}">
+  return `<div class="task ${t.done?"done":""}" data-task="${t.id}" ${canDrag() ? 'draggable="true"' : ""}>
     <button class="check" data-check="${t.id}" aria-label="Tamamla"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button>
     <div class="t-body">
       <div class="t-title">${esc(t.title)}</div>
@@ -1064,6 +1066,51 @@ $("#content").addEventListener("click", (e) => {
   if (u){ patchTask(u.dataset.totoday, { date: today() }); toast("Bugüne alındı"); return; }
   const t = e.target.closest("[data-task]");
   if (t) openTask(t.dataset.task);
+});
+
+/* görevi sürükleyip soldaki listeye bırakma (bilgisayar) */
+let dragTaskId = null;
+const clearDrag = () => {
+  dragTaskId = null;
+  document.querySelectorAll(".task.dragging, .li.drop-over").forEach(el => el.classList.remove("dragging", "drop-over"));
+};
+$("#content").addEventListener("dragstart", (e) => {
+  const row = e.target.closest("[data-task]"); if (!row) return;
+  dragTaskId = row.dataset.task;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", dragTaskId);
+  row.classList.add("dragging");
+});
+$("#content").addEventListener("dragend", clearDrag);
+const treeEl = $("#listTree");
+treeEl.addEventListener("dragover", (e) => {
+  if (!dragTaskId) return;
+  const head = e.target.closest("[data-toggle]");
+  if (head) {   // kapalı grubun üstüne gelince aç
+    const g = head.closest(".group");
+    if (g && g.classList.contains("collapsed")) { g.classList.remove("collapsed"); S.collapsed[head.dataset.toggle] = false; }
+    return;
+  }
+  const li = e.target.closest(".li");
+  treeEl.querySelectorAll(".li.drop-over").forEach(el => { if (el !== li) el.classList.remove("drop-over"); });
+  if (!li || !li.dataset.view.startsWith("list:")) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  li.classList.add("drop-over");
+});
+treeEl.addEventListener("dragleave", (e) => {
+  const li = e.target.closest(".li");
+  if (li && !li.contains(e.relatedTarget)) li.classList.remove("drop-over");
+});
+treeEl.addEventListener("drop", (e) => {
+  const li = e.target.closest(".li");
+  if (!dragTaskId || !li || !li.dataset.view.startsWith("list:")) return;
+  e.preventDefault();
+  const lid = li.dataset.view.slice(5), t = S.tasks.find(x => x.id === dragTaskId), l = listById(lid);
+  clearDrag();
+  if (!t || !l) return;
+  if (t.listId === lid) { toast("Görev zaten bu listede"); return; }
+  patchTask(t.id, { listId: lid }).then(() => toast(`Taşındı · ${l.name}`)).catch(err => toast("Taşınamadı: " + (err.code || "")));
 });
 
 $("#composerAdd").onclick = submitComposer;
