@@ -45,8 +45,35 @@ export function dueSlots(time, now, windowMin) {
   return out;
 }
 
+export const TASK_REM_WINDOW = 90; // görev hatırlatması en fazla 90 dk gecikmeyle yine gönderilir
 export const SUMMARY_WINDOW = 90;  // özet en fazla 90 dk gecikmeyle yine gönderilir
 export const NAG_WINDOW = 30;      // ısrarlı hatırlatma en fazla 30 dk gecikmeyle
+
+// Görevlere tek tek konmuş hatırlatmalar (tarih + saat). Zamanı gelmiş olanları tek iş olarak döner.
+export function planTaskReminders(tasks, now, sentKeys = {}) {
+  const items = [];
+  for (const t of tasks) {
+    if (t.done) continue;
+    for (const r of t.reminders || []) {
+      if (!r || !r.date || !r.time) continue;
+      const diff = dayDiff(r.date, now.date) * 1440 + now.min - toMin(r.time);
+      if (diff < 0 || diff >= TASK_REM_WINDOW) continue;
+      const key = `${r.date}_trem_${t.id}_${r.id}_${r.time}`;
+      if (sentKeys[key]) continue;
+      items.push({ taskId: t.id, key });
+    }
+  }
+  if (!items.length) return [];
+  return [{ kind: "taskrem", label: "Görev hatırlatması", date: now.date,
+            items, keys: items.map(i => i.key) }];
+}
+
+// Bir görevde "şu andan sonraki" ilk hatırlatma (yoksa null). remDue alanı için.
+export function nextRemDue(reminders, nowStr) {
+  const c = (reminders || []).filter(r => r && r.date && r.time).map(r => `${r.date}T${r.time}`)
+    .filter(x => x > nowStr).sort();
+  return c[0] || null;
+}
 
 // Gönderilecek işleri belirle
 export function planJobs(settings, now, sentKeys = {}, test = false) {
@@ -82,11 +109,27 @@ export function planJobs(settings, now, sentKeys = {}, test = false) {
 }
 
 // Bir kullanıcıya bir iş için bildirim içeriği üret (yoksa null)
-export function buildMessage(job, tasks, listById, settings) {
+export function buildMessage(job, tasks, listById, settings, uid = null) {
   const s = normSettings(settings);
   const D = job.date;
   const name = (t) => { const l = listById(t.listId); return l ? `${t.title} (${l.name})` : t.title; };
   const open = tasks.filter(t => !t.done);
+
+  if (job.kind === "taskrem") {
+    // Hatırlatmayı koyan kişiye (ve göreve atanan kişiye) gider; kayıt sahibi belli değilse görebilenlere
+    const ids = new Set((job.items || []).map(i => i.taskId));
+    const items = open.filter(t => {
+      if (!ids.has(t.id)) return false;
+      const who = [t.createdBy, t.assignedTo].filter(Boolean);
+      return !uid || !who.length || who.includes(uid);
+    });
+    if (!items.length) return null;
+    return {
+      title: items.length === 1 ? `Hatırlatma: ${items[0].title}` : `${items.length} görev hatırlatması`,
+      body: items.slice(0, 6).map(t => "• " + name(t) + (t.note ? ` — ${String(t.note).slice(0, 80)}` : "")).join("\n"),
+      urgent: false
+    };
+  }
 
   if (job.kind === "nag") {
     const items = open.filter(t => t.persistent && t.date && t.date <= D)

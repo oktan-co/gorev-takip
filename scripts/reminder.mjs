@@ -7,7 +7,7 @@
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
-import { istanbulNow, planJobs, buildMessage, tasksForUser, normSettings, addDays } from "./plan.mjs";
+import { istanbulNow, planJobs, planTaskReminders, nextRemDue, buildMessage, tasksForUser, normSettings, addDays } from "./plan.mjs";
 
 const TEST = process.env.TEST === "true" || process.argv.includes("--test");
 
@@ -28,7 +28,14 @@ async function main() {
   const keys = { ...(sent.keys || {}) };
 
   const jobs = planJobs(settings, now, keys, TEST);
-  if (!jobs.length) { console.log(`Saat ${now.hhmm}: gönderilecek hatırlatma yok.`); return; }
+
+  // Görevlere konmuş hatırlatmalar: sadece zamanı gelmiş (remDue <= şimdi) görevleri sorgula
+  const nowStr = `${now.date}T${now.hhmm}`;
+  const dueTasks = TEST ? [] : (await db.collection("tasks").where("remDue", "<=", nowStr).get())
+    .docs.map(d => ({ id: d.id, ...d.data() }));
+  if (dueTasks.length) jobs.push(...planTaskReminders(dueTasks, now, keys));
+
+  if (!jobs.length && !dueTasks.length) { console.log(`Saat ${now.hhmm}: gönderilecek hatırlatma yok.`); return; }
 
   const [lists, tasks, tokens, users] = await Promise.all(["lists", "tasks", "tokens", "users"].map(col));
   const listById = (id) => lists.find(l => l.id === id);
@@ -48,7 +55,7 @@ async function main() {
     for (const [uid, toks] of byUser) {
       const me = users.find(u => u.id === uid);
       const mine = tasksForUser(uid, me?.role === "admin", tasks, lists);
-      const msg = buildMessage(job, mine, listById, settings);
+      const msg = buildMessage(job, mine, listById, settings, uid);
       if (!msg) { console.log(`${job.label} → ${uid}: gönderilecek görev yok.`); continue; }
 
       const res = await getMessaging().sendEachForMulticast({
@@ -69,6 +76,11 @@ async function main() {
     for (const k of job.keys) keys[k] = Date.now();
     log.push({ at: Date.now(), label: job.label, devices });
   }
+
+  // Gönderilen ya da kaçan hatırlatmaları geçip bir sonrakine ilerle
+  await Promise.all(dueTasks.map(t =>
+    db.doc("tasks/" + t.id).update({ remDue: nextRemDue(t.reminders, nowStr) })
+      .catch(e => console.error("remDue güncellenemedi", t.id, e.code || e.message))));
 
   // Eski kayıtları temizle
   const cutoff = addDays(now.date, -3);

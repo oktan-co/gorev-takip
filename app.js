@@ -227,6 +227,18 @@ function firstWritableList(){
 const patchTask = (id, data) => updateDoc(doc(db, "tasks", id), data);
 const removeTask = (id) => deleteDoc(doc(db, "tasks", id));
 
+/* görev hatırlatmaları: {id, date:"YYYY-MM-DD", time:"HH:MM"}; remDue = sıradaki hatırlatma (sunucu bunu sorgular) */
+const REM_WINDOW_MIN = 90;
+const nowStr = (d = new Date()) => `${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const validRem = (r) => r && /^\d{4}-\d{2}-\d{2}$/.test(r.date || "") && /^\d{2}:\d{2}$/.test(r.time || "");
+function calcRemDue(rems){
+  const lim = nowStr(new Date(Date.now() - REM_WINDOW_MIN * 60000));
+  const c = (rems || []).filter(validRem).map(r => `${r.date}T${r.time}`).filter(x => x >= lim).sort();
+  return c[0] || null;
+}
+const remLabel = (r) => `${dateLabel(r.date)} ${r.time}`;
+const newRemId = () => "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
 async function toggleDone(t){
   // Tekrarlayan görev: bu seferki tamamlandı olarak kaydedilir, görev sonraki tarihe kayar
   if (!t.done && isValidRule(t.repeat)) {
@@ -241,7 +253,11 @@ async function toggleDone(t){
       createdBy: S.uid, createdAt: Date.now()
     });
     if (next) {
-      await patchTask(t.id, { date: next, steps: (t.steps || []).map(x => ({ ...x, done: false })) });
+      // hatırlatmalar görevle aynı gün sayısı kadar kayar (ör. her ayın 10'unda 09:00)
+      const delta = dayDiff(occ, next);
+      const rems = (t.reminders || []).filter(validRem).map(r => ({ ...r, date: addDays(r.date, delta) }));
+      await patchTask(t.id, { date: next, steps: (t.steps || []).map(x => ({ ...x, done: false })),
+                              reminders: rems, remDue: calcRemDue(rems) });
       toast(`Tamamlandı · sonraki: ${dateLabel(next)}`);
     } else {
       await patchTask(t.id, { done: true, doneAt: Date.now() });
@@ -325,6 +341,11 @@ function taskRow(t, opts = {}){
   if (late) meta.push(`<span class="late">${svg("alert")}${lateLabel(t.date)}</span>`);
   else if (t.date && !opts.hideDate) meta.push(`<span>${svg("cal")}${dateLabel(t.date)}</span>`);
   if (isValidRule(t.repeat) && !t.done) meta.push(`<span>${svg("repeat")}${esc(describe(t.repeat, t.date))}</span>`);
+  if (!t.done) {
+    const up = (t.reminders || []).filter(validRem).filter(r => `${r.date}T${r.time}` > nowStr())
+      .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`))[0];
+    if (up) meta.push(`<span>${svg("bell")}${esc(remLabel(up))}</span>`);
+  }
   if ((t.steps || []).length) meta.push(`<span>${svg("check")}${t.steps.filter(x => x.done).length}/${t.steps.length}</span>`);
   if (t.persistent && !t.done) meta.push(`<span class="nag">${svg("bell")}Israrlı</span>`);
   if (t.note) meta.push(`<span>${svg("note")}Not</span>`);
@@ -885,20 +906,16 @@ function openTask(id){
   const sheet = $("#sheet");
   // panelde düzenlenen geçici kopya
   const E = { rule: t.repeat ? JSON.parse(JSON.stringify(t.repeat)) : null, persistent: !!t.persistent,
-              steps: (t.steps || []).map(x => ({ ...x })) };
+              steps: (t.steps || []).map(x => ({ ...x })),
+              reminders: (t.reminders || []).filter(validRem).map(r => ({ ...r })) };
 
   $("#sheetTitle").textContent = t.fromRepeat ? "Tamamlanan tekrar" : "Görev";
   $("#sheetContent").innerHTML = `
     <label class="field"><span>Başlık</span><input type="text" id="tTitle" value="${esc(t.title)}"></label>
     ${t.fromRepeat ? ((t.steps || []).length ? `<div class="block"><div class="row-label">${svg("check")} Adımlar</div><div id="stepList"></div></div>` : "") : `
-    <div class="block">
-      <div class="row-label">${svg("check")} Adımlar</div>
+    <div class="block steps-block">
       <div id="stepList"></div>
-      <div class="inline-add">
-        <input type="text" id="stepNew" placeholder="Adım ekle, Enter'a bas">
-        <button class="btn" id="stepAdd">Ekle</button>
-      </div>
-      <p class="row-sub" style="margin-top:6px">Hepsi işaretlenince görev tamamlanır. Alt alta yapıştırırsan her satır ayrı adım olur.</p>
+      <button class="step-add" id="stepAdd" type="button">+ Adım ekle</button>
     </div>
     `}
     <label class="field"><span>Not</span><textarea id="tNote" placeholder="Detay, adres, telefon...">${esc(t.note||"")}</textarea></label>
@@ -913,6 +930,16 @@ function openTask(id){
       <button class="chip" data-quick="">Tarihsiz</button>
     </div>
     ${t.fromRepeat ? "" : `
+    <details class="block rep-acc" id="remAcc">
+      <summary><span class="row-label">${svg("bell")} Hatırlatma</span><span class="rep-sum" id="remSum">Yok</span><svg viewBox="0 0 24 24" class="chev">${ICONS.chev}</svg></summary>
+      <div id="remList"></div>
+      <div class="chips" style="margin-top:8px">
+        <button class="chip" data-rq="h1">1 saat sonra</button>
+        <button class="chip" data-rq="eve">Bu akşam 20:00</button>
+        <button class="chip" data-rq="tom">Yarın 09:00</button>
+        <button class="chip" data-rq="new">+ Tarih ve saat seç</button>
+      </div>
+    </details>
     <details class="block rep-acc" id="repAcc">
       <summary><span class="row-label">${svg("repeat")} Tekrar</span><span class="rep-sum" id="repSum">Yok</span><svg viewBox="0 0 24 24" class="chev">${ICONS.chev}</svg></summary>
       <div id="repeatBox"></div>
@@ -937,44 +964,97 @@ function openTask(id){
   `;
   sheet.hidden = false;
 
-  /* adımlar: her değişiklik hemen kaydedilir, hepsi bitince görev tamamlanır */
-  const paintSteps = () => {
+  /* adımlar: "+ Adım ekle" dedikçe altta yeni satır açılır; her değişiklik hemen kaydedilir,
+     hepsi işaretlenince görev tamamlanır. Boş satırlar kaydedilmez. */
+  const realSteps = () => E.steps.filter(x => (x.text || "").trim());
+  const persistSteps = () => patchTask(t.id, { steps: realSteps() });
+  const newStep = (text = "") => ({ id: "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), text, done: false });
+  const paintSteps = (focusIdx = null, popFrom = null) => {
     const box = $("#stepList"); if (!box) return;
     const ro = !!t.fromRepeat;
     box.innerHTML = E.steps.map((x, i) => `
-      <div class="step ${x.done ? "done" : ""}">
+      <div class="step ${x.done ? "done" : ""} ${popFrom !== null && i >= popFrom ? "pop" : ""}">
         <button class="check ${x.done ? "on" : ""}" data-sck="${i}" ${ro ? "disabled" : ""} aria-label="Adımı işaretle"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button>
-        <span class="step-t">${esc(x.text)}</span>
+        ${ro ? `<span class="step-t">${esc(x.text)}</span>`
+             : `<input type="text" class="step-in" data-sin="${i}" value="${esc(x.text)}" placeholder="Adım">`}
         ${ro ? "" : `<button class="icon-btn" data-sdel="${i}" aria-label="Adımı sil">${svg("trash")}</button>`}
       </div>`).join("");
     box.querySelectorAll("[data-sck]").forEach(b => b.onclick = async () => {
-      const x = E.steps[+b.dataset.sck]; x.done = !x.done; paintSteps();
-      await patchTask(t.id, { steps: E.steps });
-      if (E.steps.length && E.steps.every(y => y.done)) {
+      const x = E.steps[+b.dataset.sck]; if (!(x.text || "").trim()) return;
+      x.done = !x.done; paintSteps(); await persistSteps();
+      const real = realSteps();
+      if (real.length && real.every(y => y.done)) {
         const cur = S.tasks.find(z => z.id === t.id) || t;
-        await toggleDone({ ...cur, steps: E.steps });
+        await toggleDone({ ...cur, steps: real });
         sheet.hidden = true; toast("Tüm adımlar bitti, görev tamamlandı");
       }
     });
     box.querySelectorAll("[data-sdel]").forEach(b => b.onclick = async () => {
-      E.steps.splice(+b.dataset.sdel, 1); paintSteps(); await patchTask(t.id, { steps: E.steps });
+      E.steps.splice(+b.dataset.sdel, 1); paintSteps(); await persistSteps();
     });
+    box.querySelectorAll("[data-sin]").forEach(inp => {
+      const i = +inp.dataset.sin;
+      inp.addEventListener("change", () => { E.steps[i].text = inp.value.trim(); persistSteps(); });
+      inp.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        const v = inp.value.trim(); if (!v) return;
+        E.steps[i].text = v;
+        if (!E.steps[i + 1] || (E.steps[i + 1].text || "").trim()) E.steps.splice(i + 1, 0, newStep());
+        paintSteps(i + 1, i + 1); persistSteps();
+      });
+      inp.addEventListener("paste", (e) => {   // alt alta yapıştırılırsa her satır ayrı adım olur
+        const txt = (e.clipboardData || window.clipboardData).getData("text");
+        if (!/\r?\n/.test(txt.trim())) return;
+        e.preventDefault();
+        const lines = txt.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+        E.steps[i].text = lines[0];
+        E.steps.splice(i + 1, 0, ...lines.slice(1).map(x => newStep(x)));
+        paintSteps(null, i + 1); persistSteps();
+      });
+    });
+    if (focusIdx !== null) { const f = box.querySelector(`[data-sin="${focusIdx}"]`); if (f) f.focus(); }
   };
-  const addSteps = async (text) => {
-    const lines = String(text).split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-    if (!lines.length) return;
-    lines.forEach((x, i) => E.steps.push({ id: "s" + Date.now().toString(36) + i, text: x, done: false }));
-    $("#stepNew").value = ""; paintSteps(); await patchTask(t.id, { steps: E.steps });
+  if ($("#stepAdd")) $("#stepAdd").onclick = () => {
+    const last = E.steps[E.steps.length - 1];
+    if (last && !(last.text || "").trim()) { const f = $("#stepList").querySelector(`[data-sin="${E.steps.length - 1}"]`); if (f) f.focus(); return; }
+    E.steps.push(newStep());
+    paintSteps(E.steps.length - 1, E.steps.length - 1);
   };
+  if (t.fromRepeat) { if ($("#stepAdd")) $("#stepAdd").hidden = true; }
   paintSteps();
-  if ($("#stepNew")) {
-    $("#stepAdd").onclick = () => addSteps($("#stepNew").value);
-    $("#stepNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addSteps($("#stepNew").value); } });
-    $("#stepNew").addEventListener("paste", (e) => {
-      const txt = (e.clipboardData || window.clipboardData).getData("text");
-      if (/\r?\n/.test(txt.trim())) { e.preventDefault(); addSteps(txt); }
-    });
-  }
+
+  /* hatırlatmalar: Kaydet'e basınca kaydedilir */
+  const sumRems = () => {
+    const el = $("#remSum"); if (!el) return;
+    const v = E.reminders.filter(validRem);
+    el.textContent = !v.length ? "Yok" : v.length === 1 ? remLabel(v[0]) : `${v.length} hatırlatma`;
+  };
+  const paintRems = () => {
+    const box = $("#remList"); if (!box) return;
+    box.innerHTML = E.reminders.map((r, i) => `
+      <div class="remrow">
+        <input type="date" data-rd="${i}" value="${esc(r.date || "")}">
+        <input type="time" data-rh="${i}" value="${esc(r.time || "")}">
+        <button class="icon-btn" data-rdel="${i}" aria-label="Hatırlatmayı sil">${svg("trash")}</button>
+      </div>`).join("");
+    box.querySelectorAll("[data-rd]").forEach(el => el.onchange = () => { E.reminders[+el.dataset.rd].date = el.value; sumRems(); });
+    box.querySelectorAll("[data-rh]").forEach(el => el.onchange = () => { E.reminders[+el.dataset.rh].time = el.value; sumRems(); });
+    box.querySelectorAll("[data-rdel]").forEach(el => el.onclick = () => { E.reminders.splice(+el.dataset.rdel, 1); paintRems(); });
+    sumRems();
+  };
+  const addRem = (kind) => {
+    const n = new Date();
+    let d = ymd(n), tm = "09:00";
+    if (kind === "h1") { const x = new Date(Date.now() + 3600000); d = ymd(x); tm = `${pad(x.getHours())}:${pad(x.getMinutes())}`; }
+    else if (kind === "eve") { tm = "20:00"; if (nowStr() >= `${d}T20:00`) d = addDays(d, 1); }
+    else if (kind === "tom") { d = addDays(d, 1); }
+    else { d = $("#tDate").value || d; }
+    E.reminders.push({ id: newRemId(), date: d, time: tm });
+    paintRems();
+  };
+  paintRems();
+  sheet.querySelectorAll("[data-rq]").forEach(b => b.onclick = () => addRem(b.dataset.rq));
 
   const paintRepeat = () => {
     const box = $("#repeatBox"); if (!box) return;
@@ -1021,11 +1101,13 @@ function openTask(id){
       repeat = E.rule;
       if (!date) date = firstOccurrence(repeat, today(), today());
     }
+    const reminders = t.fromRepeat ? null : E.reminders.filter(validRem)
+      .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
     const data = {
       title, note: $("#tNote").value.trim(), date,
       listId: $("#tList").value, assignedTo: $("#tUser").value || null
     };
-    if (!t.fromRepeat) { data.repeat = repeat; data.persistent = E.persistent; }
+    if (!t.fromRepeat) { data.repeat = repeat; data.persistent = E.persistent; data.reminders = reminders; data.remDue = calcRemDue(reminders); }
     await patchTask(t.id, data);
     sheet.hidden = true; toast("Kaydedildi");
   };

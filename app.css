@@ -13,6 +13,7 @@
   --dang-soft:#3a2224;
   --ok:#4bbf8a;
   --warn:#e5a33a;
+  --nag:#b48cff;
   --radius:12px;
   --safe-b:env(safe-area-inset-bottom,0px);
 }
@@ -23,7 +24,7 @@
     --tx:#1b1b1f; --tx-2:#5d5d66; --tx-3:#8a8a93;
     --acc:#4a5ae8; --acc-soft:#e8eaff;
     --dang:#d33b3b; --dang-soft:#fdeaea;
-    --ok:#1d9e75; --warn:#b9770d;
+    --ok:#1d9e75; --warn:#b9770d; --nag:#7c4dcc;
   }
 }
 *{box-sizing:border-box}
@@ -230,7 +231,7 @@ textarea{width:100%;background:var(--bg-3);border:1px solid var(--line);border-r
 .dcell{background:var(--bg-3);border:1px solid var(--line);border-radius:8px;padding:7px 0;font-size:13px;cursor:pointer;color:var(--tx-2)}
 .dcell.sel{background:var(--acc);border-color:var(--acc);color:#fff}
 input[type=number]{background:var(--bg-3);border:1px solid var(--line);border-radius:9px;padding:9px 11px;outline:none}
-.t-meta .nag{color:var(--dang)}
+.t-meta .nag{color:var(--nag)}
 
 .toast{position:fixed;left:50%;bottom:calc(22px + var(--safe-b));transform:translateX(-50%);background:var(--bg-3);border:1px solid var(--line-2);border-radius:999px;padding:10px 18px;font-size:13px;z-index:80;box-shadow:0 6px 20px rgba(0,0,0,.35)}
 
@@ -252,13 +253,21 @@ input[type=number]{background:var(--bg-3);border:1px solid var(--line);border-ra
 .task.dragging{opacity:.45}
 .li.drop-over{background:var(--acc-soft);outline:2px dashed var(--acc);outline-offset:-2px}
 
-/* adımlar */
-.step{display:flex;align-items:center;gap:11px;padding:7px 0}
-.step-t{flex:1;font-size:14.5px;min-width:0;overflow-wrap:anywhere}
-.step.done .step-t{color:var(--tx-3);text-decoration:line-through}
-.step .check{margin-top:0}
+/* adımlar: bulut gibi yumuşak satırlar */
+.steps-block{border-bottom:none;padding-bottom:4px}
+.step{display:flex;align-items:center;gap:10px;margin:7px 0;padding:5px 6px 5px 12px;background:transparent;border:1px solid var(--line);border-radius:22px}
+.step.pop{animation:stepPop .28s cubic-bezier(.2,1.4,.4,1) both}
+@keyframes stepPop{from{opacity:0;transform:translateY(-6px) scale(.94)}to{opacity:1;transform:none}}
+.step .check{margin-top:0;border-radius:50%;width:22px;height:22px}
 .step .check.on{background:var(--ok);border-color:var(--ok)}
 .step .check.on svg{opacity:1}
+.step-t,.step-in{flex:1;min-width:0;font-size:14.5px}
+.step-in{background:none;border:none;outline:none;padding:4px 2px}
+.step.done .step-in,.step.done .step-t{color:var(--tx-3);text-decoration:line-through}
+.step .icon-btn{padding:6px;opacity:.6}
+.step-add{display:inline-flex;align-items:center;gap:6px;margin-top:4px;background:none;border:1.5px dashed var(--line-2);color:var(--tx-2);border-radius:22px;padding:7px 16px;font-size:13.5px;cursor:pointer}
+.step-add:hover{border-color:var(--acc);color:var(--acc)}
+@media (prefers-reduced-motion:reduce){.step.pop{animation:none}}
 
 /* tekrar: açılır kapanır */
 .rep-acc summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none}
@@ -267,3 +276,7 @@ input[type=number]{background:var(--bg-3);border:1px solid var(--line);border-ra
 .rep-acc .chev{width:18px;height:18px;fill:none;stroke:var(--tx-3);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto;transition:transform .15s}
 .rep-acc[open] .chev{transform:rotate(180deg)}
 .rep-acc[open] summary{margin-bottom:6px}
+
+/* hatırlatma satırları */
+.remrow{display:flex;gap:8px;align-items:center;margin:6px 0}
+.remrow input{flex:1;min-width:0;background:var(--bg-3);border:1px solid var(--line);border-radius:9px;padding:8px 10px;outline:none}
