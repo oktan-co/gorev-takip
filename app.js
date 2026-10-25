@@ -237,10 +237,11 @@ async function toggleDone(t){
       title: t.title, note: t.note || "", listId: t.listId, date: occ,
       done: true, doneAt: Date.now(), assignedTo: t.assignedTo || null,
       repeat: null, persistent: false, fromRepeat: t.id,
+      steps: (t.steps || []).map(x => ({ ...x })),
       createdBy: S.uid, createdAt: Date.now()
     });
     if (next) {
-      await patchTask(t.id, { date: next });
+      await patchTask(t.id, { date: next, steps: (t.steps || []).map(x => ({ ...x, done: false })) });
       toast(`Tamamlandı · sonraki: ${dateLabel(next)}`);
     } else {
       await patchTask(t.id, { done: true, doneAt: Date.now() });
@@ -324,6 +325,7 @@ function taskRow(t, opts = {}){
   if (late) meta.push(`<span class="late">${svg("alert")}${lateLabel(t.date)}</span>`);
   else if (t.date && !opts.hideDate) meta.push(`<span>${svg("cal")}${dateLabel(t.date)}</span>`);
   if (isValidRule(t.repeat) && !t.done) meta.push(`<span>${svg("repeat")}${esc(describe(t.repeat, t.date))}</span>`);
+  if ((t.steps || []).length) meta.push(`<span>${svg("check")}${t.steps.filter(x => x.done).length}/${t.steps.length}</span>`);
   if (t.persistent && !t.done) meta.push(`<span class="nag">${svg("bell")}Israrlı</span>`);
   if (t.note) meta.push(`<span>${svg("note")}Not</span>`);
   if (t.assignedTo) meta.push(`<span>${svg("users")}${esc(userName(t.assignedTo))}</span>`);
@@ -882,11 +884,23 @@ function openTask(id){
   const t = S.tasks.find(x => x.id === id); if (!t) return;
   const sheet = $("#sheet");
   // panelde düzenlenen geçici kopya
-  const E = { rule: t.repeat ? JSON.parse(JSON.stringify(t.repeat)) : null, persistent: !!t.persistent };
+  const E = { rule: t.repeat ? JSON.parse(JSON.stringify(t.repeat)) : null, persistent: !!t.persistent,
+              steps: (t.steps || []).map(x => ({ ...x })) };
 
   $("#sheetTitle").textContent = t.fromRepeat ? "Tamamlanan tekrar" : "Görev";
   $("#sheetContent").innerHTML = `
     <label class="field"><span>Başlık</span><input type="text" id="tTitle" value="${esc(t.title)}"></label>
+    ${t.fromRepeat ? ((t.steps || []).length ? `<div class="block"><div class="row-label">${svg("check")} Adımlar</div><div id="stepList"></div></div>` : "") : `
+    <div class="block">
+      <div class="row-label">${svg("check")} Adımlar</div>
+      <div id="stepList"></div>
+      <div class="inline-add">
+        <input type="text" id="stepNew" placeholder="Adım ekle, Enter'a bas">
+        <button class="btn" id="stepAdd">Ekle</button>
+      </div>
+      <p class="row-sub" style="margin-top:6px">Hepsi işaretlenince görev tamamlanır. Alt alta yapıştırırsan her satır ayrı adım olur.</p>
+    </div>
+    `}
     <label class="field"><span>Not</span><textarea id="tNote" placeholder="Detay, adres, telefon...">${esc(t.note||"")}</textarea></label>
     <div class="row">
       <div class="row-label">Tarih</div>
@@ -899,11 +913,11 @@ function openTask(id){
       <button class="chip" data-quick="">Tarihsiz</button>
     </div>
     ${t.fromRepeat ? "" : `
-    <div class="block">
-      <div class="row-label">${svg("repeat")} Tekrar</div>
+    <details class="block rep-acc" id="repAcc">
+      <summary><span class="row-label">${svg("repeat")} Tekrar</span><span class="rep-sum" id="repSum">Yok</span><svg viewBox="0 0 24 24" class="chev">${ICONS.chev}</svg></summary>
       <div id="repeatBox"></div>
       <p class="row-sub" id="repeatInfo" style="margin-top:8px"></p>
-    </div>
+    </details>
     <div class="row">
       <div><div class="row-label">${svg("bell")} Israrlı hatırlatma</div>
       <div class="row-sub">Yapılmazsa ${esc([...S.settings.nagTimes].sort().join(" · ") || "—")}</div></div>
@@ -923,6 +937,45 @@ function openTask(id){
   `;
   sheet.hidden = false;
 
+  /* adımlar: her değişiklik hemen kaydedilir, hepsi bitince görev tamamlanır */
+  const paintSteps = () => {
+    const box = $("#stepList"); if (!box) return;
+    const ro = !!t.fromRepeat;
+    box.innerHTML = E.steps.map((x, i) => `
+      <div class="step ${x.done ? "done" : ""}">
+        <button class="check ${x.done ? "on" : ""}" data-sck="${i}" ${ro ? "disabled" : ""} aria-label="Adımı işaretle"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button>
+        <span class="step-t">${esc(x.text)}</span>
+        ${ro ? "" : `<button class="icon-btn" data-sdel="${i}" aria-label="Adımı sil">${svg("trash")}</button>`}
+      </div>`).join("");
+    box.querySelectorAll("[data-sck]").forEach(b => b.onclick = async () => {
+      const x = E.steps[+b.dataset.sck]; x.done = !x.done; paintSteps();
+      await patchTask(t.id, { steps: E.steps });
+      if (E.steps.length && E.steps.every(y => y.done)) {
+        const cur = S.tasks.find(z => z.id === t.id) || t;
+        await toggleDone({ ...cur, steps: E.steps });
+        sheet.hidden = true; toast("Tüm adımlar bitti, görev tamamlandı");
+      }
+    });
+    box.querySelectorAll("[data-sdel]").forEach(b => b.onclick = async () => {
+      E.steps.splice(+b.dataset.sdel, 1); paintSteps(); await patchTask(t.id, { steps: E.steps });
+    });
+  };
+  const addSteps = async (text) => {
+    const lines = String(text).split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    if (!lines.length) return;
+    lines.forEach((x, i) => E.steps.push({ id: "s" + Date.now().toString(36) + i, text: x, done: false }));
+    $("#stepNew").value = ""; paintSteps(); await patchTask(t.id, { steps: E.steps });
+  };
+  paintSteps();
+  if ($("#stepNew")) {
+    $("#stepAdd").onclick = () => addSteps($("#stepNew").value);
+    $("#stepNew").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addSteps($("#stepNew").value); } });
+    $("#stepNew").addEventListener("paste", (e) => {
+      const txt = (e.clipboardData || window.clipboardData).getData("text");
+      if (/\r?\n/.test(txt.trim())) { e.preventDefault(); addSteps(txt); }
+    });
+  }
+
   const paintRepeat = () => {
     const box = $("#repeatBox"); if (!box) return;
     const presets = (S.settings.repeatPresets || []).filter(p => p && isValidRule(p.rule));
@@ -935,11 +988,14 @@ function openTask(id){
     });
     const dateVal = $("#tDate").value || null;
     let info = "";
+    $("#repSum").textContent = "Yok";
     if (E.rule && isValidRule(E.rule)) {
       const first = dateVal || firstOccurrence(E.rule, today(), today());
+      $("#repSum").textContent = describe(E.rule, first);
       const next = nextOccurrence(E.rule, first, first);
       info = `${describe(E.rule, first)} · ${dateVal ? "sıradaki" : "ilk"}: ${dateLabel(first)}${next ? ", sonra " + dateLabel(next) : ""}`;
     } else if (E.rule) {
+      $("#repSum").textContent = "Gün seç";
       info = "Gün seçmeden tekrar kaydedilmez.";
     }
     $("#repeatInfo").textContent = info;
@@ -961,7 +1017,7 @@ function openTask(id){
     let date = $("#tDate").value || null;
     let repeat = null;
     if (!t.fromRepeat && E.rule) {
-      if (!isValidRule(E.rule)) { toast("Tekrar için gün seç ya da \"Yok\" de"); return; }
+      if (!isValidRule(E.rule)) { $("#repAcc").open = true; toast("Tekrar için gün seç ya da \"Yok\" de"); return; }
       repeat = E.rule;
       if (!date) date = firstOccurrence(repeat, today(), today());
     }

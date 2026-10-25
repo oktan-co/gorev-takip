@@ -251,3 +251,19 @@ input[type=number]{background:var(--bg-3);border:1px solid var(--line);border-ra
 .task[draggable="true"]{-webkit-user-drag:element}
 .task.dragging{opacity:.45}
 .li.drop-over{background:var(--acc-soft);outline:2px dashed var(--acc);outline-offset:-2px}
+
+/* adımlar */
+.step{display:flex;align-items:center;gap:11px;padding:7px 0}
+.step-t{flex:1;font-size:14.5px;min-width:0;overflow-wrap:anywhere}
+.step.done .step-t{color:var(--tx-3);text-decoration:line-through}
+.step .check{margin-top:0}
+.step .check.on{background:var(--ok);border-color:var(--ok)}
+.step .check.on svg{opacity:1}
+
+/* tekrar: açılır kapanır */
+.rep-acc summary{display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none}
+.rep-acc summary::-webkit-details-marker{display:none}
+.rep-acc .rep-sum{flex:1;text-align:right;color:var(--tx-2);font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rep-acc .chev{width:18px;height:18px;fill:none;stroke:var(--tx-3);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto;transition:transform .15s}
+.rep-acc[open] .chev{transform:rotate(180deg)}
+.rep-acc[open] summary{margin-bottom:6px}
