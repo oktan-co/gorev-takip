@@ -293,25 +293,6 @@ function renderSidebar(){
       <span class="li-count">${openCount(l.id) || ""}</span>
     </button>`;
 
-  /* --- kayıtlı tekrar kuralları --- */
-  const presets = s.repeatPresets || [];
-  const presetRows = presets.map((p, i) => {
-    const open = S.editPreset === p.id;
-    const ok = isValidRule(p.rule);
-    return `<div class="rem">
-      <div class="rem-top">
-        <input type="text" class="rem-label" data-pr-name="${i}" value="${esc(p.name)}" placeholder="İsim (ör. 3 ayda bir ödeme)">
-        <button class="icon-btn" data-pr-del="${i}" aria-label="Sil">${svg("trash")}</button>
-      </div>
-      <div class="row-sub" style="margin:6px 0">${ok ? esc(describe(p.rule)) : "Gün seçilmemiş, görevlerde görünmez"}</div>
-      <button class="btn" data-pr-edit="${i}">${open ? "Kapat" : "Kuralı düzenle"}</button>
-      ${open ? `<div class="pr-editor" data-pr-box="${i}" style="margin-top:8px"></div>` : ""}
-    </div>`; }).join("");
-  const presetBody = `
-    <p class="help">Burada kendi tekrar kurallarını hazırlarsın (ör. "3 ayda bir, ayın 10'u"). Kaydettiklerin görev ekranında Tekrar bölümünde tek dokunuşla seçilir.</p>
-    ${presetRows || `<p class="help">Henüz kural yok.</p>`}
-    <button class="btn btn-block" id="prAdd" style="margin-top:10px">+ Kural ekle</button>`;
-
   let html = "";
   for (const grp of S.groups){
     const items = lists.filter(l => l.groupId === grp.id);
@@ -560,6 +541,25 @@ function renderSettings(){
       <div><div class="row-label">Kullanıcılar ve paylaşım</div><div class="row-sub">${S.users.length} kullanıcı</div></div>
       <button class="btn" id="goUsers">Aç</button>
     </div>` : ""}`;
+
+  /* --- kayıtlı tekrar kuralları --- */
+  const presets = s.repeatPresets || [];
+  const presetRows = presets.map((p, i) => {
+    const open = S.editPreset === p.id;
+    const ok = isValidRule(p.rule);
+    return `<div class="rem">
+      <div class="rem-top">
+        <input type="text" class="rem-label" data-pr-name="${i}" value="${esc(p.name)}" placeholder="İsim (ör. 3 ayda bir ödeme)">
+        <button class="icon-btn" data-pr-del="${i}" aria-label="Sil">${svg("trash")}</button>
+      </div>
+      <div class="row-sub" style="margin:6px 0">${ok ? esc(describe(p.rule)) : "Gün seçilmemiş, görevlerde görünmez"}</div>
+      <button class="btn" data-pr-edit="${i}">${open ? "Kapat" : "Kuralı düzenle"}</button>
+      ${open ? `<div class="pr-editor" data-pr-box="${i}" style="margin-top:8px"></div>` : ""}
+    </div>`; }).join("");
+  const presetBody = `
+    <p class="help">Burada kendi tekrar kurallarını hazırlarsın (ör. "3 ayda bir, ayın 10'u"). Kaydettiklerin görev ekranında Tekrar bölümünde tek dokunuşla seçilir.</p>
+    ${presetRows || `<p class="help">Henüz kural yok.</p>`}
+    <button class="btn btn-block" id="prAdd" style="margin-top:10px">+ Kural ekle</button>`;
 
   let html = "";
   if (S.isAdmin) {
