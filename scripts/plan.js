@@ -127,7 +127,7 @@ export function buildMessage(job, tasks, listById, settings, uid = null) {
     return {
       title: items.length === 1 ? `Hatırlatma: ${items[0].title}` : `${items.length} görev hatırlatması`,
       body: items.slice(0, 6).map(t => "• " + name(t) + (t.note ? ` — ${String(t.note).slice(0, 80)}` : "")).join("\n"),
-      urgent: false
+      urgent: false, tasks: items.map(t => t.id)
     };
   }
 
@@ -140,7 +140,7 @@ export function buildMessage(job, tasks, listById, settings, uid = null) {
       const late = dayDiff(t.date, D);
       return "• " + name(t) + (late > 0 ? ` — ${late} gün gecikti` : "");
     }).join("\n");
-    return { title, body, urgent: true };
+    return { title, body, urgent: true, tasks: items.map(t => t.id) };
   }
 
   const remind = open.filter(t => listById(t.listId)?.reminder !== false || t.assignedTo);
@@ -158,16 +158,19 @@ export function buildMessage(job, tasks, listById, settings, uid = null) {
   // today
   const late = remind.filter(t => t.date && t.date < D).sort((a, b) => a.date.localeCompare(b.date));
   const dueToday = remind.filter(t => t.date === D);
-  const undated = s.includeUndated !== false ? remind.filter(t => !t.date) : [];
+  // Tarihsiz görevler özette her zaman yer alır (Bugün ekranındaki ayardan bağımsız)
+  const undated = remind.filter(t => !t.date);
   if (!late.length && !dueToday.length && !undated.length) return null;
   const lines = [];
   if (late.length) lines.push("Gecikmiş: " + late.slice(0, 4).map(t => `${name(t)} — ${dayDiff(t.date, D)} gün`).join(" · "));
   if (dueToday.length) lines.push("Bugün: " + dueToday.slice(0, 6).map(name).join(" · "));
-  if (undated.length) lines.push(`Tarihsiz: ${undated.length} görev bekliyor`);
+  if (undated.length) lines.push("Tarihsiz: " + undated.slice(0, 6).map(name).join(" · ")
+    + (undated.length > 6 ? ` +${undated.length - 6} görev daha` : ""));
   const title = late.length ? `${late.length} gecikmiş, ${dueToday.length} bugünlük görev`
     : dueToday.length ? `Bugün ${dueToday.length} görevin var`
     : `${undated.length} tarihsiz görev bekliyor`;
-  return { title, body: lines.join("\n") };
+  const tail = (late.length || dueToday.length) && undated.length ? `, ${undated.length} tarihsiz` : "";
+  return { title: title + tail, body: lines.join("\n") };
 }
 
 // Kullanıcının görebildiği görevler
@@ -201,7 +204,8 @@ export function buildAlarmPlan({ uid, isAdmin, tasks, lists, settings, now = ist
     const ts = istanbulTs(date, time);
     if (!(ts >= fromTs && ts < toTs)) return;
     alarms.push({ id, ts, at: `${date}T${time}`, kind, title: msg.title,
-                  body: String(msg.body || "").slice(0, 700), urgent: !!msg.urgent });
+                  body: String(msg.body || "").slice(0, 700), urgent: !!msg.urgent,
+                  ...(msg.tasks && msg.tasks.length ? { tasks: msg.tasks } : {}) });
   };
 
   for (let d = -1; d < days; d++) {
@@ -236,4 +240,4 @@ export function buildAlarmPlan({ uid, isAdmin, tasks, lists, settings, now = ist
 
 // Planın içerik özeti: aynı plan tekrar tekrar kaydedilmesin diye
 export const planSignature = (plan) =>
-  JSON.stringify(plan.alarms.map(a => [a.id, a.ts, a.title, a.body, a.urgent]));
+  JSON.stringify(plan.alarms.map(a => [a.id, a.ts, a.title, a.body, a.urgent, a.tasks || null]));

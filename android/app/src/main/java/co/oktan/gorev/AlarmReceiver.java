@@ -19,10 +19,13 @@ public class AlarmReceiver extends BroadcastReceiver {
         new Thread(() -> {
             try {
                 try { Remote.pullPlan(c); } catch (Exception ignored) { /* internet yoksa eldeki plan */ }
-                for (Alarm a : Alarm.parse(Store.planJson(c))) {
+                for (Alarm a : Store.alarms(c)) {
                     if (a.ts == ts && !Store.fired(c, a.id)) {
-                        Notifier.show(c, a);
                         Store.markFired(c, a.id);
+                        if (!Store.shouldShow(c, a)) continue;
+                        // Ertelenen hatırlatma: görev bu arada başka yerden bitirildiyse çalma
+                        if (a.id.startsWith("snz_") && !a.tasks.isEmpty() && !Remote.taskOpen(c, a.tasks.get(0))) continue;
+                        Notifier.show(c, a);
                     }
                 }
                 Scheduler.apply(c, false);

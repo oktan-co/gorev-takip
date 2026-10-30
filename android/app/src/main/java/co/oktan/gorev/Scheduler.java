@@ -40,7 +40,7 @@ final class Scheduler {
      */
     static synchronized void apply(Context c, boolean catchUp) {
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
-        List<Alarm> alarms = Alarm.parse(Store.planJson(c));
+        List<Alarm> alarms = Store.alarms(c);
         long now = System.currentTimeMillis();
         Set<String> keep = new HashSet<>();
         for (Alarm a : alarms) {
@@ -52,8 +52,8 @@ final class Scheduler {
                 set(c, am, a.ts, pending(c, a.ts));
                 keep.add(k);
             } else if (catchUp && now - a.ts < 60L * 60000L) {
-                Notifier.show(c, a);
                 Store.markFired(c, a.id);
+                if (Store.shouldShow(c, a)) Notifier.show(c, a);
             }
         }
         for (String k : Store.scheduled(c)) {

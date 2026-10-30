@@ -554,7 +554,7 @@ function renderSettings(){
     ${remRows || `<p class="help">Hiç hatırlatma yok.</p>`}
     <button class="btn btn-block" id="remAdd" style="margin-top:10px">+ Hatırlatma ekle</button>
     <div class="row">
-      <div><div class="row-label">Tarihsiz görevleri de göster</div><div class="row-sub">Bugün ekranında ve sabah özetinde</div></div>
+      <div><div class="row-label">Tarihsiz görevleri de göster</div><div class="row-sub">Bugün ekranında (sabah özetinde her zaman yer alır)</div></div>
       ${sw(`id="setUndated"`, s.includeUndated !== false)}
     </div>`;
   const activeRem = s.reminders.filter(r => r.enabled !== false).map(r => r.time).join(", ") || "kapalı";

@@ -14,6 +14,7 @@ public class SyncWorker extends Worker {
     public Result doWork() {
         Context c = getApplicationContext();
         if (Store.uid(c) == null) return Result.success();
+        ActionReceiver.flush(c);
         try {
             Remote.pullPlan(c);
         } catch (Exception e) {
