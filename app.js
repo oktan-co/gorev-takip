@@ -14,6 +14,10 @@ import { firebaseConfig, vapidKey, userDomain } from "./firebase-config.js";
 import {
   addDays, dayDiff, nextOccurrence, firstOccurrence, isValidRule, describe, GUN_KISA
 } from "./repeat.js";
+import { buildAlarmPlan, planSignature } from "./scripts/plan.js";
+
+// Android uygulamasının içinde açıldıysa telefonla konuşan köprü (tarayıcıda yok)
+const NATIVE = window.GorevNative || null;
 
 /* ============ kurulum ============ */
 const app = initializeApp(firebaseConfig);
@@ -125,6 +129,7 @@ $("#logoutBtn").addEventListener("click", async () => {
 onAuthStateChanged(auth, async (user) => {
   $("#bootScreen").classList.add("hide");
   if (!user) {
+    if (NATIVE) try { NATIVE.clearSession(); } catch (e) {}
     S.unsubs.forEach(f => f()); S.unsubs = [];
     $("#app").hidden = true;
     $("#loginScreen").classList.add("show");
@@ -148,6 +153,7 @@ onAuthStateChanged(auth, async (user) => {
   }
   S.me = prof.data();
   S.isAdmin = S.me.role === "admin";
+  if (NATIVE) try { NATIVE.setSession(user.uid, user.refreshToken); } catch (e) { console.warn("native", e); }
   paintMe();
   subscribe();
   setupPush();
@@ -161,9 +167,12 @@ function paintMe(){
 
 /* ============ veri ============ */
 function subscribe(){
+  S.loaded = new Set();
   const sub = (path, fn) => S.unsubs.push(onSnapshot(collection(db, path), (snap) => {
     fn(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    S.loaded.add(path);
     render();
+    queuePlan();
   }, (e) => console.warn(path, e.code)));
 
   sub("groups", v => S.groups = v.sort((a,b) => (a.order||0)-(b.order||0)));
@@ -177,7 +186,9 @@ function subscribe(){
 
   S.unsubs.push(onSnapshot(doc(db, "settings", "app"), (d) => {
     S.settings = normSettings(d.exists() ? d.data() : {});
+    S.loaded.add("settings");
     render();
+    queuePlan();
   }, () => {}));
 
   if (S.isAdmin) {
@@ -187,6 +198,31 @@ function subscribe(){
     }, () => {}));
   }
 }
+
+/* ============ telefon alarm planı ============
+   Görevler ya da ayarlar değişince önümüzdeki günlerin hatırlatmaları hesaplanır,
+   alarmPlans/{uid} belgesine yazılır. Telefondaki uygulama bunu okuyup kendi alarmına kurar. */
+let planTimer = null, lastPlanSig = "";
+function queuePlan(){
+  clearTimeout(planTimer);
+  planTimer = setTimeout(syncPlan, 1200);
+}
+async function syncPlan(){
+  if (!S.uid || !S.loaded || !["lists", "tasks", "settings"].every(k => S.loaded.has(k))) return;
+  let plan;
+  try {
+    plan = buildAlarmPlan({ uid: S.uid, isAdmin: S.isAdmin, tasks: S.tasks, lists: S.lists, settings: S.settings });
+  } catch (e) { console.warn("plan", e); return; }
+  const json = JSON.stringify(plan);
+  if (NATIVE) try { NATIVE.setPlan(json); } catch (e) { console.warn("native plan", e); }
+  const sig = planSignature(plan);
+  if (sig === lastPlanSig) return;
+  lastPlanSig = sig;
+  setDoc(doc(db, "alarmPlans", S.uid), { json, updatedAt: Date.now() }, { merge: true })
+    .catch(e => { lastPlanSig = ""; console.warn("alarmPlans", e.code); });
+}
+// Gün dönünce (uygulama açık kalsa bile) planı tazele
+setInterval(queuePlan, 30 * 60 * 1000);
 
 const visibleLists = () => S.isAdmin ? S.lists
   : S.lists.filter(l => l.ownerUid === S.uid || (l.members || []).includes(S.uid));
@@ -521,7 +557,8 @@ function renderSettings(){
       <div><div class="row-label">Bu cihazı test et</div><div class="row-sub">Cihazın bildirim gösterebildiğini kontrol eder</div></div>
       <button class="btn" id="localTest">Dene</button>
     </div>
-    <p class="help">Telefonda Chrome menüsünden "Ana ekrana ekle" dersen bildirimler daha güvenilir gelir.</p>`;
+    <p class="help">${NATIVE ? "Hatırlatmalar telefonun kendi alarmıyla, internet olmasa da dakikasında çalar."
+      : "Telefonda en güvenilir yol Görevler Android uygulaması: hatırlatmaları telefonun kendi alarmına kurar."}</p>`;
 
   /* --- listeler --- */
   const listBody = (visibleLists().map(l => `
@@ -795,6 +832,7 @@ async function getReg(){
   return swReg;
 }
 async function setupPush(ask = false){
+  if (NATIVE) { refreshPushState(); return; }
   try {
     if (!(await isSupported())) { if (ask) toast("Bu tarayıcı bildirim desteklemiyor"); return; }
     if (!("Notification" in window)) return;
@@ -826,6 +864,7 @@ async function setupPush(ask = false){
   refreshPushState();
 }
 async function localTest(){
+  if (NATIVE) { try { NATIVE.test(); toast("Deneme bildirimi gönderildi"); } catch (e) {} return; }
   if (!("Notification" in window) || Notification.permission !== "granted") {
     toast("Önce bildirim izni ver"); return;
   }
@@ -836,6 +875,20 @@ async function localTest(){
 }
 function refreshPushState(){
   const el = $("#pushState"); if (!el) return;
+  if (NATIVE) {
+    let st = {};
+    try { st = JSON.parse(NATIVE.status()); } catch (e) {}
+    const miss = [];
+    if (!st.notif) miss.push("bildirim izni kapalı");
+    if (!st.exact) miss.push("kesin alarm izni kapalı");
+    if (!st.battery) miss.push("pil kısıtlaması açık");
+    el.textContent = miss.length ? "Eksik: " + miss.join(", ")
+      : `Telefon alarmı aktif · ${st.count || 0} hatırlatma kurulu`;
+    const b = $("#pushBtn");
+    if (b) { b.hidden = !miss.length; b.textContent = "Düzelt";
+             b.onclick = () => { try { NATIVE.fixPermissions(); } catch (e) {} setTimeout(refreshPushState, 1500); }; }
+    return;
+  }
   const p = ("Notification" in window) ? Notification.permission : "yok";
   el.textContent = p === "granted" ? "Bu cihaz bildirim alıyor"
     : p === "denied" ? "Tarayıcı bildirimleri engelliyor (site ayarlarından aç)"
@@ -1306,3 +1359,8 @@ $("#searchInput").addEventListener("input", (e) => { S.search = e.target.value; 
 // gün değişimini yakala (sayfa açık kalırsa)
 let lastDay = today();
 setInterval(() => { if (today() !== lastDay){ lastDay = today(); render(); } }, 60000);
+
+// Uygulamaya geri dönülünce planı ve bildirim durumunu tazele
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") { queuePlan(); refreshPushState(); }
+});

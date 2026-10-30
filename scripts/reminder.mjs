@@ -7,7 +7,8 @@
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
-import { istanbulNow, planJobs, planTaskReminders, nextRemDue, buildMessage, tasksForUser, normSettings, addDays } from "./plan.mjs";
+import { istanbulNow, planJobs, planTaskReminders, nextRemDue, buildMessage, tasksForUser, normSettings, addDays,
+         buildAlarmPlan, planSignature } from "./plan.mjs";
 
 const TEST = process.env.TEST === "true" || process.argv.includes("--test");
 
@@ -35,14 +36,22 @@ async function main() {
     .docs.map(d => ({ id: d.id, ...d.data() }));
   if (dueTasks.length) jobs.push(...planTaskReminders(dueTasks, now, keys));
 
+  const [lists, tasks, tokens, users, plans] = await Promise.all(["lists", "tasks", "tokens", "users", "alarmPlans"].map(col));
+  const listById = (id) => lists.find(l => l.id === id);
+
+  // Telefon uygulamalarının alarm planlarını tazele (kimse siteyi açmasa da günler ilerlesin)
+  if (!TEST) await refreshPlans(users, tasks, lists, settings, plans, now);
+
   if (!jobs.length && !dueTasks.length) { console.log(`Saat ${now.hhmm}: gönderilecek hatırlatma yok.`); return; }
 
-  const [lists, tasks, tokens, users] = await Promise.all(["lists", "tasks", "tokens", "users"].map(col));
-  const listById = (id) => lists.find(l => l.id === id);
+  // Android uygulaması kurulu (son 3 günde eşitlenmiş) kişilerin telefonları alarmı kendisi çalar;
+  // aynı hatırlatma bir de Chrome'dan gelmesin diye o kişilerin Android tarayıcı kayıtları atlanır.
+  const nativeUids = new Set(plans.filter(p => (p.nativeAt || 0) > Date.now() - 3 * 86400000).map(p => p.id));
 
   const byUser = new Map();
   for (const tok of tokens) {
     if (!tok.token) continue;
+    if (nativeUids.has(tok.uid) && /Android/i.test(tok.agent || "")) continue;
     if (!byUser.has(tok.uid)) byUser.set(tok.uid, []);
     byUser.get(tok.uid).push(tok.token);
   }
@@ -88,6 +97,20 @@ async function main() {
   await db.doc("system/sent").set({ keys, log: log.slice(-40) });
 
   await Promise.all([...deadTokens].map(t => db.doc("tokens/" + t.slice(0, 120)).delete().catch(() => {})));
+}
+
+async function refreshPlans(users, tasks, lists, settings, plans, now) {
+  for (const u of users) {
+    try {
+      const plan = buildAlarmPlan({ uid: u.id, isAdmin: u.role === "admin", tasks, lists, settings, now });
+      const old = plans.find(p => p.id === u.id);
+      let same = false;
+      try { same = old?.json && planSignature(JSON.parse(old.json)) === planSignature(plan); } catch (e) {}
+      if (same) continue;
+      await db.doc("alarmPlans/" + u.id).set({ json: JSON.stringify(plan), updatedAt: Date.now() }, { merge: true });
+      console.log(`Alarm planı yenilendi → ${u.id}: ${plan.alarms.length} hatırlatma`);
+    } catch (e) { console.error("Alarm planı yazılamadı", u.id, e.code || e.message); }
+  }
 }
 
 main().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });

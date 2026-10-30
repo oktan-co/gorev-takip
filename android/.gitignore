@@ -1,0 +1,4 @@
+release.jks
+build/
+.gradle/
+build.log

@@ -68,6 +68,11 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // Telefon uygulamasının alarm planı: herkes yalnız kendi planını okur ve yazar.
+    match /alarmPlans/{uid} {
+      allow read, write: if known() && request.auth.uid == uid;
+    }
+
     // Bildirim için cihaz anahtarları: herkes kendi cihazını kaydeder.
     match /tokens/{id} {
       allow read: if isAdmin();
