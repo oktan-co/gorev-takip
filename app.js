@@ -488,6 +488,34 @@ function renderBanner(){
   $("#bannerClose").onclick = () => { try { localStorage.setItem("gt_banner", today()); } catch(e){} b.hidden = true; };
 }
 
+/* ============ APK güncelleme şeridi (yalnızca Android uygulamasında) ============ */
+function renderUpdate(){
+  const b = $("#updateBanner");
+  if (!b || !NATIVE || typeof NATIVE.updateInfo !== "function") return;
+  let u = {};
+  try { u = JSON.parse(NATIVE.updateInfo()); } catch(e){}
+  if (!u.available){ b.hidden = true; return; }
+  const busy = u.state === "downloading";
+  const note = u.state === "izin" ? "İzni verip geri dön, sonra tekrar Güncelle'ye bas."
+    : u.state === "error" ? "İndirilemedi, tekrar dene." : "";
+  b.hidden = false;
+  b.innerHTML = `${svg("clock")}<span>Yeni sürüm var (${esc(u.name)}). ${esc(note)}</span>
+    <button id="updateGo">${busy ? "İniyor..." : "Güncelle"}</button>`;
+  $("#updateGo").onclick = () => {
+    if (busy) return;
+    try { NATIVE.startUpdate(); } catch(e){}
+    setTimeout(renderUpdate, 600);
+    setTimeout(renderUpdate, 3000);
+  };
+}
+function checkUpdate(){
+  if (!NATIVE || typeof NATIVE.checkUpdate !== "function") return;
+  try { NATIVE.checkUpdate(); } catch(e){ return; }
+  setTimeout(renderUpdate, 2500);
+}
+checkUpdate();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
+
 /* ============ ayarlar ============ */
 function acc(key, title, sub, body){
   const open = S.openAcc[key] ? "open" : "";

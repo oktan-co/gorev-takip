@@ -62,4 +62,19 @@ final class Bridge {
     public void fixPermissions() {
         a.runOnUiThread(() -> a.fixPermissions(true));
     }
+
+    @JavascriptInterface
+    public String updateInfo() {
+        return Updater.info();
+    }
+
+    @JavascriptInterface
+    public void checkUpdate() {
+        Updater.check();
+    }
+
+    @JavascriptInterface
+    public void startUpdate() {
+        a.runOnUiThread(() -> Updater.start(a));
+    }
 }
