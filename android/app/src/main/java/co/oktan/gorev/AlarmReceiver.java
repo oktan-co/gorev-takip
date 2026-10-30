@@ -11,7 +11,7 @@ public class AlarmReceiver extends BroadcastReceiver {
         final Context c = ctx.getApplicationContext();
         if (intent.getBooleanExtra("test", false)) {
             Notifier.show(c, new Alarm("test", System.currentTimeMillis(), "test",
-                    "Görevler · deneme", "Telefon alarmı çalışıyor. Hatırlatmalar dakikasında gelecek.", false));
+                    "Görevler · deneme ✓", "Telefon alarmı çalışıyor. Hatırlatmalar dakikasında gelecek (sürüm güncellemesi denendi).", false));
             return;
         }
         final long ts = intent.getLongExtra("ts", 0);
