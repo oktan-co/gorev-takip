@@ -108,8 +108,8 @@ async function refreshPlans(users, tasks, lists, settings, plans, now) {
       try { same = old?.json && planSignature(JSON.parse(old.json)) === planSignature(plan); } catch (e) {}
       if (same) continue;
       await db.doc("alarmPlans/" + u.id).set({ json: JSON.stringify(plan), updatedAt: Date.now() }, { merge: true });
-      console.log(`Alarm planı yenilendi → ${u.id}: ${plan.alarms.length} hatırlatma`);
-    } catch (e) { console.error("Alarm planı yazılamadı", u.id, e.code || e.message); }
+      console.log(`::notice title=Alarm planı::${u.username || u.id}: ${plan.alarms.length} hatırlatma`);
+    } catch (e) { console.log(`::error title=Alarm planı yazılamadı::${u.id} ${e.code || e.message}`); }
   }
 }
 
