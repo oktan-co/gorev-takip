@@ -61,9 +61,9 @@ public class MainActivity extends Activity {
     }
 
     private static String offlinePage() {
-        return "<html><body style=\"background:#0f0f10;color:#ddd;font-family:sans-serif;text-align:center;padding-top:30vh\">"
+        return "<html><body style=\"background:#150d12;color:#ddd;font-family:sans-serif;text-align:center;padding-top:30vh\">"
                 + "<p>İnternet yok. Hatırlatmalar yine de telefonun alarmıyla çalar.</p>"
-                + "<button style=\"padding:12px 22px;font-size:16px;border-radius:10px;border:0;background:#6c7cff;color:#fff\" "
+                + "<button style=\"padding:12px 22px;font-size:16px;border-radius:10px;border:0;background:#ff5fa2;color:#fff\" "
                 + "onclick=\"location.href='" + Config.APP_URL + "'\">Tekrar dene</button></body></html>";
     }
 

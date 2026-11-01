@@ -24,7 +24,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-const COLORS = ["#6c7cff","#1d9e75","#e5a33a","#d85a30","#d4537e","#7f77dd","#378add","#639922","#b4b2a9"];
+const COLORS = ["#ff5fa2","#1d9e75","#e5a33a","#d85a30","#d4537e","#7f77dd","#378add","#639922","#b4b2a9"];
 
 const DEFAULT_SETTINGS = {
   reminders: [
@@ -341,7 +341,7 @@ function renderSidebar(){
   const openCount = (lid) => visibleTasks().filter(t => t.listId === lid && !t.done).length;
   const listRow = (l) => `
     <button class="li ${S.view==="list:"+l.id?"active":""}" data-view="list:${l.id}">
-      <span class="dot" style="background:${esc(l.color||"#6c7cff")}"></span>
+      <span class="dot" style="background:${esc(l.color||"#ff5fa2")}"></span>
       <span class="li-name">${esc(l.name)}</span>
       ${(l.members||[]).length ? `<span class="li-shared">${svg("users")}</span>` : ""}
       <span class="li-count">${openCount(l.id) || ""}</span>
@@ -386,7 +386,7 @@ function taskRow(t, opts = {}){
   if (t.persistent && !t.done) meta.push(`<span class="nag">${svg("bell")}Israrlı</span>`);
   if (t.note) meta.push(`<span>${svg("note")}Not</span>`);
   if (t.assignedTo) meta.push(`<span>${svg("users")}${esc(userName(t.assignedTo))}</span>`);
-  if (l) meta.push(`<span class="tag"><span class="d" style="background:${esc(l.color||"#6c7cff")}"></span>${esc(l.name)}</span>`);
+  if (l) meta.push(`<span class="tag"><span class="d" style="background:${esc(l.color||"#ff5fa2")}"></span>${esc(l.name)}</span>`);
   return `<div class="task ${t.done?"done":""}" data-task="${t.id}" ${canDrag() ? 'draggable="true"' : ""}>
     <button class="check" data-check="${t.id}" aria-label="Tamamla"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button>
     <div class="t-body">
@@ -591,7 +591,7 @@ function renderSettings(){
   /* --- listeler --- */
   const listBody = (visibleLists().map(l => `
     <div class="row">
-      <div class="row-label"><span class="dot" style="background:${esc(l.color||"#6c7cff")};display:inline-block;margin-right:8px"></span>${esc(l.name)}</div>
+      <div class="row-label"><span class="dot" style="background:${esc(l.color||"#ff5fa2")};display:inline-block;margin-right:8px"></span>${esc(l.name)}</div>
       ${sw(`data-lrem="${l.id}"`, l.reminder !== false)}
     </div>`).join("") || `<p class="help">Liste yok.</p>`) +
     `<p class="help">Kapalı listeler sabah ve gece özetlerinde yer almaz. Israrlı görevler her zaman bildirilir.</p>`;
@@ -799,7 +799,7 @@ function renderUsers(){
     <div class="sub-head">Liste üyeleri</div>
     ${visibleLists().map(l => `
       <div class="row" style="display:block">
-        <div class="row-label"><span class="dot" style="background:${esc(l.color||"#6c7cff")};display:inline-block;margin-right:8px"></span>${esc(l.name)}</div>
+        <div class="row-label"><span class="dot" style="background:${esc(l.color||"#ff5fa2")};display:inline-block;margin-right:8px"></span>${esc(l.name)}</div>
         <div class="chips">${S.users.filter(u => u.id !== S.uid).map(u => `
           <button class="chip ${(l.members||[]).includes(u.id)?"sel":""}" data-member="${l.id}" data-uid="${u.id}">${esc(u.displayName||u.username)}</button>
         `).join("") || `<span class="row-sub">Başka kullanıcı yok</span>`}</div>

@@ -63,7 +63,7 @@ final class Notifier {
         int id = notifId(a);
         Notification.Builder b = new Notification.Builder(c, a.urgent ? CH_URGENT : CH_NORMAL)
                 .setSmallIcon(R.drawable.ic_stat)
-                .setColor(0xFF6C7CFF)
+                .setColor(0xFFFF5FA2)
                 .setContentTitle(a.title)
                 .setContentText(first)
                 .setStyle(new Notification.BigTextStyle().bigText(a.body))
